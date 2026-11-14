@@ -422,15 +422,15 @@ export class SignalTracker {
             threshold = median * 0.9;
 
             if (movingAvg < threshold) {
-                metrics.state = 'Low RTT';
+                metrics.state = 'Online';
             } else {
-                metrics.state = 'High RTT';
+                metrics.state = 'Standby';
             }
         } else {
             metrics.state = 'Calibrating...';
         }
 
-        const stateColor = metrics.state === 'Low RTT' ? '🔵' : metrics.state === 'High RTT' ? '🟡' : '⚪';
+        const stateColor = metrics.state === 'Online' ? '🟢' : metrics.state === 'Standby' ? '🟡' : '⚪';
         logger.info(`${stateColor} ${identifier}: ${metrics.state} (RTT: ${metrics.lastRtt}ms, Avg: ${movingAvg.toFixed(0)}ms)`);
     }
 

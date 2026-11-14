@@ -22,7 +22,7 @@ This project implements the research from the paper **"Careless Whisper: Exploit
 
 ![WhatsApp Activity Tracker Interface](example.png)
 
-The web interface shows real-time RTT measurements and relative latency categories. A single uncalibrated RTT series cannot establish whether a phone screen is active.
+The web interface shows real-time RTT measurements and tentative activity labels. A single uncalibrated RTT series cannot establish whether a phone screen is active.
 
 ## Installation
 
@@ -129,7 +129,7 @@ Follow prompts to authenticate and enter a consenting target number. The flag co
 ║ 🟡 Device Status Update - 09:41:51                             ║
 ╠════════════════════════════════════════════════════════════════╣
 ║ JID:        ***********@lid                                    ║
-║ Status:     High RTT                                           ║
+║ Status:     Standby                                            ║
 ║ RTT:        1104ms                                             ║
 ║ Avg (3):    1161ms                                             ║
 ║ Median:     1195ms                                             ║
@@ -137,8 +137,8 @@ Follow prompts to authenticate and enter a consenting target number. The flag co
 ╚════════════════════════════════════════════════════════════════╝
 ```
 
-- **🔵 Low RTT**: RTT below the current relative threshold; screen activity is unconfirmed.
-- **🟡 High RTT**: RTT at or above the threshold; screen activity is unconfirmed.
+- **🟢 Online**: Low relative RTT suggests activity; this is an estimate, not proof that the app is open.
+- **🟡 Standby**: Higher relative RTT suggests inactivity; the app may still be open.
 - **⚪ No ACK**: No delivery confirmation arrived within 10 seconds; this does not prove that the device is offline.
 
 ## How It Works
@@ -154,7 +154,7 @@ The tracker sends probe messages and measures the Round-Trip Time (RTT) of deliv
 
 ### Detection Logic
 
-The time between sending the probe and receiving a CLIENT ACK (status 3) is measured as RTT. The app labels values relative to 90% of the running median as **Low RTT** or **High RTT**. These labels describe latency only. Our live test classified an open WhatsApp session as “Standby,” so screen-state inference requires separate calibration with known open and closed periods. A missing ACK is shown as **No ACK**, not as proof that the device is offline.
+The time between sending the probe and receiving a CLIENT ACK (status 3) is measured as RTT. The app estimates **Online** or **Standby** using a threshold of 90% of the running median. These are tentative labels based on latency: our live test classified an open WhatsApp session as “Standby.” Reliable screen-state inference requires calibration with known open and closed periods. A missing ACK is shown as **No ACK**, not as proof that the device is offline.
 
 ### Switching Probe Methods
 

@@ -39,7 +39,7 @@ class TrackerLogger {
     }
 
     formatDeviceState(jid: string, rtt: number, avgRtt: number, median: number, threshold: number, state: string) {
-        const stateColor = state === 'Low RTT' ? '🔵' : state === 'High RTT' ? '🟡' : '⚪';
+        const stateColor = state === 'Online' ? '🟢' : state === 'Standby' ? '🟡' : '⚪';
         const timestamp = new Date().toLocaleTimeString('de-DE');
 
         // Box width is 64 characters, inner content is 62 characters (excluding ║ on both sides)
@@ -74,7 +74,7 @@ const trackerLogger = new TrackerLogger();
 interface DeviceMetrics {
     rttHistory: number[];      // Historical RTT measurements (up to 2000)
     recentRtts: number[];      // Recent RTTs for moving average (last 3)
-    state: string;             // RTT category (Low RTT/High RTT/Calibrating/No ACK)
+    state: string;             // RTT estimate (Online/Standby/Calibrating/No ACK)
     lastRtt: number;           // Most recent RTT measurement
     lastUpdate: number;        // Timestamp of last update
 }
@@ -495,9 +495,9 @@ export class WhatsAppTracker {
             threshold = median * 0.9;
 
             if (movingAvg < threshold) {
-                metrics.state = 'Low RTT';
+                metrics.state = 'Online';
             } else {
-                metrics.state = 'High RTT';
+                metrics.state = 'Standby';
             }
         } else {
             metrics.state = 'Calibrating...';
