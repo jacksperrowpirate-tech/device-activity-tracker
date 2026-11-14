@@ -1,89 +1,10 @@
-import React from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { ConnectionState } from '../App';
-import { CheckCircle } from 'lucide-react';
+import { Check, MessageCircle, Radio } from 'lucide-react';
+import { ConnectionState } from '../types/connections';
 
-interface LoginProps {
-    connectionState: ConnectionState;
-}
-
-export function Login({ connectionState }: LoginProps) {
-
-    return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* WhatsApp Connection */}
-            <div className="flex flex-col items-center justify-center bg-white p-8 rounded-xl shadow-sm border border-gray-200">
-                <div className="flex items-center gap-2 mb-6">
-                    <h2 className="text-2xl font-semibold">Connect WhatsApp</h2>
-                    {connectionState.whatsapp && (
-                        <CheckCircle className="text-green-500" size={24} />
-                    )}
-                </div>
-                {connectionState.whatsapp ? (
-                    <div className="w-64 h-64 flex flex-col items-center justify-center text-green-600 bg-green-50 rounded-lg">
-                        <CheckCircle size={64} className="mb-4" />
-                        <span className="text-lg font-medium">Connected!</span>
-                    </div>
-                ) : (
-                    <>
-                        <div className="bg-gray-50 p-4 rounded-lg mb-6">
-                            {connectionState.whatsappQr ? (
-                                <QRCodeSVG value={connectionState.whatsappQr} size={256} />
-                            ) : (
-                                <div className="w-64 h-64 flex items-center justify-center text-gray-400">
-                                    Waiting for QR Code...
-                                </div>
-                            )}
-                        </div>
-                        <p className="text-gray-600 text-center max-w-md">
-                            Open WhatsApp on your phone, go to Settings {'>'} Linked Devices, and scan the QR code to connect.
-                        </p>
-                    </>
-                )}
-            </div>
-
-            {/* Signal Connection */}
-            <div className="flex flex-col items-center justify-center bg-white p-8 rounded-xl shadow-sm border border-gray-200">
-                <div className="flex items-center gap-2 mb-6">
-                    <h2 className="text-2xl font-semibold">Connect Signal</h2>
-                    {connectionState.signal && (
-                        <CheckCircle className="text-blue-500" size={24} />
-                    )}
-                </div>
-                {connectionState.signal ? (
-                    <div className="w-64 h-64 flex flex-col items-center justify-center text-blue-600 bg-blue-50 rounded-lg">
-                        <CheckCircle size={64} className="mb-4" />
-                        <span className="text-lg font-medium">Connected!</span>
-                        <span className="text-sm text-blue-500 mt-2">{connectionState.signalNumber}</span>
-                    </div>
-                ) : connectionState.signalApiAvailable ? (
-                    <>
-                        <div className="bg-gray-50 p-4 rounded-lg mb-6">
-                            {connectionState.signalQrImage ? (
-                                <img
-                                    src={connectionState.signalQrImage}
-                                    alt="Signal QR Code"
-                                    width={256}
-                                    height={256}
-                                    className="bg-white"
-                                />
-                            ) : (
-                                <div className="w-64 h-64 flex items-center justify-center text-gray-400">
-                                    Waiting for QR Code...
-                                </div>
-                            )}
-                        </div>
-                        <p className="text-gray-600 text-center max-w-md">
-                            Open Signal on your phone, go to Settings {'>'} Linked Devices, and scan the QR code to connect.
-                        </p>
-                    </>
-                ) : (
-                    <div className="w-64 h-64 flex flex-col items-center justify-center text-gray-400 bg-gray-50 rounded-lg">
-                        <p className="text-center px-4">Signal API not available</p>
-                        <p className="text-xs text-center px-4 mt-2">Run the signal-cli-rest-api Docker container to enable</p>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
+export function Login({ connectionState }: { connectionState: ConnectionState }) {
+    return <section className="connections-grid" aria-label="Conexões">
+        <div className="panel connection-panel"><div className="connection-head"><span className="connection-icon whatsapp"><MessageCircle size={20} /></span><div><p className="eyebrow">CANAL 01</p><h2>WhatsApp</h2></div><span className={`connection-status ${connectionState.whatsapp ? 'connected' : ''}`}>{connectionState.whatsapp ? 'CONECTADO' : 'AGUARDANDO'}</span></div>{connectionState.whatsapp ? <div className="connected-display"><div className="connected-orbit"><Check size={30} /></div><h3>Conexão estabelecida</h3><p>O canal está pronto para sessões autorizadas.</p></div> : <div className="qr-display">{connectionState.whatsappQr ? <QRCodeSVG value={connectionState.whatsappQr} size={220} /> : <div className="qr-placeholder">Aguardando QR Code...</div>}<p>No WhatsApp, abra Configurações → Aparelhos conectados e escaneie o código.</p></div>}</div>
+        <div className="panel connection-panel"><div className="connection-head"><span className="connection-icon signal"><Radio size={20} /></span><div><p className="eyebrow">CANAL 02</p><h2>Signal</h2></div><span className={`connection-status ${connectionState.signal ? 'connected' : ''}`}>{connectionState.signal ? 'CONECTADO' : connectionState.signalApiAvailable ? 'AGUARDANDO' : 'INDISPONÍVEL'}</span></div>{connectionState.signal ? <div className="connected-display"><div className="connected-orbit"><Check size={30} /></div><h3>Conexão estabelecida</h3><p>{connectionState.signalNumber || 'O canal está pronto para uso.'}</p></div> : connectionState.signalApiAvailable ? <div className="qr-display">{connectionState.signalQrImage ? <img src={connectionState.signalQrImage} alt="QR Code do Signal" width={220} height={220} /> : <div className="qr-placeholder">Aguardando QR Code...</div>}<p>No Signal, abra Configurações → Aparelhos conectados e escaneie o código.</p></div> : <div className="connected-display unavailable"><Radio size={28} /><h3>API do Signal indisponível</h3><p>Inicie o serviço signal-cli-rest-api para conectar.</p></div>}</div>
+    </section>;
 }

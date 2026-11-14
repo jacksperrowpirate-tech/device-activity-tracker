@@ -1,9 +1,12 @@
-import React from 'react';
 import { render, screen } from '@testing-library/react';
+import { vi } from 'vitest';
 import App from './App';
 
-test('renders learn react link', () => {
+test('shows username and password login when there is no session', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false })));
   render(<App />);
-  const linkElement = screen.getByText(/learn react/i);
-  expect(linkElement).toBeInTheDocument();
+  expect(await screen.findByLabelText(/usuário/i)).toBeInTheDocument();
+  expect(screen.getByLabelText(/senha/i)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: /entrar no console/i })).toBeInTheDocument();
+  vi.unstubAllGlobals();
 });

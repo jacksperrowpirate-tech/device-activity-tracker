@@ -1,379 +1,183 @@
-import React, { useEffect, useState } from 'react';
-import {Eye, EyeOff, Plus, Trash2, Zap, MessageCircle, Settings} from 'lucide-react';
-import { socket, Platform, ConnectionState } from '../App';
-import { ContactCard } from './ContactCard';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
+import { Activity, Eye, EyeOff, MessageCircle, Plus, Radio, Settings2, ShieldCheck, Users, Zap } from 'lucide-react';
+import { Platform, ConnectionState, ContactInfo, ProbeMethod, TelemetrySample, WhatsAppProfile } from '../types/connections';
 import { Login } from './Login';
+import { useSocket } from '../providers/SocketProvider';
+import { useTrackerEvents } from '../hooks/useTrackerEvents';
+import { HistoryReport } from './HistoryReport';
+import { chartDataFromProbes, mergeRecentProbes } from '../utils/telemetry';
+import { phoneCountry } from '../utils/phone-country';
 
-type ProbeMethod = 'delete' | 'reaction';
+const ContactCard = React.lazy(() => import('./ContactCard').then(module => ({ default: module.ContactCard })));
 
-interface DashboardProps {
-    connectionState: ConnectionState;
-}
-
-interface TrackerData {
-    rtt: number;
-    avg: number;
-    median: number;
-    threshold: number;
-    state: string;
-    timestamp: number;
-}
-
-interface DeviceInfo {
-    jid: string;
-    state: string;
-    rtt: number;
-    avg: number;
-}
-
-interface ContactInfo {
-    jid: string;
-    displayNumber: string;
-    contactName: string;
-    data: TrackerData[];
-    devices: DeviceInfo[];
-    deviceCount: number;
-    presence: string | null;
-    profilePic: string | null;
-    platform: Platform;
-}
-
-export function Dashboard({ connectionState }: DashboardProps) {
+export function Dashboard({ connectionState }: { connectionState: ConnectionState }) {
+    const { socket } = useSocket();
     const [inputNumber, setInputNumber] = useState('');
-    const [selectedPlatform, setSelectedPlatform] = useState<Platform>(
-        connectionState.whatsapp ? 'whatsapp' : 'signal'
-    );
+    const [inputLabel, setInputLabel] = useState('');
+    const [durationMinutes, setDurationMinutes] = useState<number | null>(60);
+    const [indefiniteAcknowledged, setIndefiniteAcknowledged] = useState(false);
+    const [selectedPlatform, setSelectedPlatform] = useState<Platform>(connectionState.whatsapp ? 'whatsapp' : 'signal');
     const [contacts, setContacts] = useState<Map<string, ContactInfo>>(new Map());
     const [error, setError] = useState<string | null>(null);
     const [privacyMode, setPrivacyMode] = useState(false);
-    const [probeMethod, setProbeMethod] = useState<ProbeMethod>('delete');
+    const [probeMethod, setProbeMethod] = useState<ProbeMethod>('reaction');
     const [showConnections, setShowConnections] = useState(false);
+    const connectionsWereUnavailable = useRef(!connectionState.whatsapp && !connectionState.signal);
+    const [consentConfirmed, setConsentConfirmed] = useState(false);
+    const [notificationsAcknowledged, setNotificationsAcknowledged] = useState(false);
+    const entries = Array.from(contacts.values());
+    const hasActiveSession = entries.length > 0;
+    const liveSamples = entries.reduce((sum, contact) => sum + contact.data.length, 0);
+    const selectedCountry = phoneCountry(inputNumber);
+
+    useTrackerEvents(socket, setContacts);
 
     useEffect(() => {
-        function onTrackerUpdate(update: any) {
-            const { jid, ...data } = update;
-            if (!jid) return;
+        if (selectedPlatform === 'whatsapp' && !connectionState.whatsapp && connectionState.signal) setSelectedPlatform('signal');
+        if (selectedPlatform === 'signal' && !connectionState.signal && connectionState.whatsapp) setSelectedPlatform('whatsapp');
+        const unavailable = !connectionState.whatsapp && !connectionState.signal;
+        if (unavailable) setShowConnections(true);
+        else if (connectionsWereUnavailable.current) setShowConnections(false);
+        connectionsWereUnavailable.current = unavailable;
+    }, [connectionState.whatsapp, connectionState.signal, selectedPlatform]);
 
+    useEffect(() => {
+        const onContactProfile = ({ jid, profile }: { jid: string; profile: WhatsAppProfile }) => setContacts(prev => {
+            const next = new Map(prev); const item = next.get(jid);
+            if (item) next.set(jid, { ...item, profile });
+            return next;
+        });
+        const onProfilePic = ({ jid, url }: { jid: string; url: string | null }) => setContacts(prev => {
+            const next = new Map(prev); const item = next.get(jid);
+            if (item) next.set(jid, { ...item, profilePic: url });
+            return next;
+        });
+        const onContactName = ({ jid, name }: { jid: string; name: string }) => setContacts(prev => {
+            const next = new Map(prev); const item = next.get(jid);
+            if (item) next.set(jid, { ...item, contactName: name });
+            return next;
+        });
+        const onContactLabel = ({ jid, label }: { jid: string; label?: string }) => setContacts(prev => {
+            const next = new Map(prev); const item = next.get(jid);
+            if (item) next.set(jid, { ...item, label });
+            return next;
+        });
+        const onContactAdded = ({ jid, number, label, platform = 'whatsapp', expiresAt }: { jid: string; number: string; label?: string; platform?: Platform; expiresAt?: number }) => {
             setContacts(prev => {
                 const next = new Map(prev);
-                const contact = next.get(jid);
-
-                if (contact) {
-                    // Update existing contact
-                    const updatedContact = { ...contact };
-
-                    if (data.presence !== undefined) {
-                        updatedContact.presence = data.presence;
-                    }
-                    if (data.deviceCount !== undefined) {
-                        updatedContact.deviceCount = data.deviceCount;
-                    }
-                    if (data.devices !== undefined) {
-                        updatedContact.devices = data.devices;
-                    }
-
-                    // Add to chart data
-                    if (data.median !== undefined && data.devices && data.devices.length > 0) {
-                        const newDataPoint: TrackerData = {
-                            rtt: data.devices[0].rtt,
-                            avg: data.devices[0].avg,
-                            median: data.median,
-                            threshold: data.threshold,
-                            state: data.devices.find((d: DeviceInfo) => d.state.includes('Online'))?.state || data.devices[0].state,
-                            timestamp: Date.now(),
-                        };
-                        updatedContact.data = [...updatedContact.data, newDataPoint];
-                    }
-
-                    next.set(jid, updatedContact);
-                }
-
-                return next;
-            });
-        }
-
-        function onProfilePic(data: { jid: string, url: string | null }) {
-            setContacts(prev => {
-                const next = new Map(prev);
-                const contact = next.get(data.jid);
-                if (contact) {
-                    next.set(data.jid, { ...contact, profilePic: data.url });
-                }
-                return next;
-            });
-        }
-
-        function onContactName(data: { jid: string, name: string }) {
-            setContacts(prev => {
-                const next = new Map(prev);
-                const contact = next.get(data.jid);
-                if (contact) {
-                    next.set(data.jid, { ...contact, contactName: data.name });
-                }
-                return next;
-            });
-        }
-
-        function onContactAdded(data: { jid: string, number: string, platform?: Platform }) {
-            setContacts(prev => {
-                const next = new Map(prev);
-                next.set(data.jid, {
-                    jid: data.jid,
-                    displayNumber: data.number,
-                    contactName: data.number,
-                    data: [],
-                    devices: [],
-                    deviceCount: 0,
-                    presence: null,
-                    profilePic: null,
-                    platform: data.platform || 'whatsapp'
+                const existing = next.get(jid);
+                next.set(jid, existing ? { ...existing, label: label ?? existing.label, expiresAt } : {
+                    jid, displayNumber: number, contactName: number, label, data: [], recentProbes: [], devices: [],
+                    deviceCount: 0, presence: null, profilePic: null, platform, expiresAt
                 });
                 return next;
             });
-            setInputNumber('');
-        }
-
-        function onContactRemoved(jid: string) {
-            setContacts(prev => {
-                const next = new Map(prev);
-                next.delete(jid);
-                return next;
-            });
-        }
-
-        function onError(data: { jid?: string, message: string }) {
-            setError(data.message);
-            setTimeout(() => setError(null), 3000);
-        }
-
-        function onProbeMethod(method: ProbeMethod) {
-            setProbeMethod(method);
-        }
-
-        function onTrackedContacts(contacts: { id: string, platform: Platform }[]) {
-            setContacts(prev => {
-                const next = new Map(prev);
-                contacts.forEach(({ id, platform }) => {
-                    if (!next.has(id)) {
-                        // Extract display number from id
-                        let displayNumber = id;
-                        if (platform === 'signal') {
-                            displayNumber = id.replace('signal:', '');
-                        } else {
-                            // WhatsApp JID format: number@s.whatsapp.net
-                            displayNumber = id.split('@')[0];
-                        }
-                        next.set(id, {
-                            jid: id,
-                            displayNumber,
-                            contactName: displayNumber,
-                            data: [],
-                            devices: [],
-                            deviceCount: 0,
-                            presence: null,
-                            profilePic: null,
-                            platform
-                        });
-                    }
+            setInputNumber(''); setInputLabel(''); setConsentConfirmed(false); setNotificationsAcknowledged(false); setIndefiniteAcknowledged(false);
+        };
+        const onContactRemoved = (jid: string) => setContacts(prev => {
+            const next = new Map(prev); next.delete(jid); return next;
+        });
+        const onError = (data: { message: string }) => setError(data.message);
+        const onTrackedContacts = (saved: { id: string; platform: Platform; consentedNumber?: string; label?: string; expiresAt?: number; recentProbes?: TelemetrySample[]; profile?: WhatsAppProfile | null }[]) => setContacts(prev => {
+            const next = new Map<string, ContactInfo>();
+            for (const { id, platform, consentedNumber, label, expiresAt, recentProbes, profile } of saved) {
+                const previous = prev.get(id);
+                const number = consentedNumber || (platform === 'signal' ? id.replace('signal:', '') : id.split('@')[0]);
+                const restored = mergeRecentProbes(recentProbes || [], previous?.recentProbes || []);
+                next.set(id, previous ? { ...previous, label, expiresAt, profile: profile ?? previous.profile, recentProbes: restored, data: chartDataFromProbes(restored), lastEventKind: restored.at(-1)?.kind ?? previous.lastEventKind } : {
+                    jid: id, displayNumber: number, contactName: number, label, data: chartDataFromProbes(restored), recentProbes: restored, devices: [],
+                    deviceCount: 0, presence: null, profilePic: null, profile, platform, expiresAt, lastEventKind: restored.at(-1)?.kind
                 });
-                return next;
-            });
-        }
+            }
+            return next;
+        });
 
-        socket.on('tracker-update', onTrackerUpdate);
         socket.on('profile-pic', onProfilePic);
+        socket.on('contact-profile', onContactProfile);
         socket.on('contact-name', onContactName);
+        socket.on('contact-label', onContactLabel);
         socket.on('contact-added', onContactAdded);
         socket.on('contact-removed', onContactRemoved);
         socket.on('error', onError);
-        socket.on('probe-method', onProbeMethod);
+        socket.on('probe-method', setProbeMethod);
         socket.on('tracked-contacts', onTrackedContacts);
-
-        // Request tracked contacts after listeners are set up
-        socket.emit('get-tracked-contacts');
-
+        const loadContacts = () => socket.emit('get-tracked-contacts');
+        socket.on('connect', loadContacts);
+        loadContacts();
         return () => {
-            socket.off('tracker-update', onTrackerUpdate);
+            socket.off('connect', loadContacts);
             socket.off('profile-pic', onProfilePic);
+            socket.off('contact-profile', onContactProfile);
             socket.off('contact-name', onContactName);
+            socket.off('contact-label', onContactLabel);
             socket.off('contact-added', onContactAdded);
             socket.off('contact-removed', onContactRemoved);
             socket.off('error', onError);
-            socket.off('probe-method', onProbeMethod);
+            socket.off('probe-method', setProbeMethod);
             socket.off('tracked-contacts', onTrackedContacts);
         };
-    }, []);
+    }, [socket]);
 
-    const handleAdd = () => {
-        if (!inputNumber) return;
-        socket.emit('add-contact', { number: inputNumber, platform: selectedPlatform });
-    };
+    function handleAdd(event: React.FormEvent) {
+        event.preventDefault();
+        if (!socket.connected || !inputNumber.trim() || !consentConfirmed || !notificationsAcknowledged || (durationMinutes === null && !indefiniteAcknowledged)) return;
+        setError(null);
+        socket.emit('add-contact', {
+            number: inputNumber.trim(), label: inputLabel.trim(), platform: selectedPlatform,
+            consent: true, notificationsAcknowledged: true, durationMinutes,
+            indefiniteConsentAcknowledged: durationMinutes === null ? indefiniteAcknowledged : undefined
+        });
+    }
 
-    const handleRemove = (jid: string) => {
-        socket.emit('remove-contact', jid);
-    };
-
-    const handleProbeMethodChange = (method: ProbeMethod) => {
-        socket.emit('set-probe-method', method);
-    };
+    const contactsSection = (
+        <section className="contacts-section"><div className="section-heading"><div><p className="eyebrow"><i className="pulse-dot" /> TELEMETRIA AO VIVO</p><h2>Contatos monitorados <span>{entries.length}</span></h2></div><div className="section-note"><ShieldCheck size={15} /> Medições são estimativas de latência</div></div>
+            {entries.length === 0 ? <div className="empty-state"><Radio size={32} /><h3>Nenhuma sessão ativa</h3><p>Adicione um contato autorizado para ver os sinais aqui.</p></div> : <Suspense fallback={<div className="empty-state">Carregando sinais...</div>}><div className="contacts-grid">{entries.map(contact => <ContactCard key={contact.jid} jid={contact.jid} label={contact.label} displayNumber={contact.displayNumber} data={contact.data} recentProbes={contact.recentProbes} devices={contact.devices} deviceCount={contact.deviceCount} presence={contact.presence} presenceUpdatedAt={contact.presenceUpdatedAt} profilePic={contact.profilePic} profile={contact.profile} onRefreshProfile={() => socket.emit('refresh-contact-profile', contact.jid)} onRemove={() => socket.emit('remove-contact', contact.jid)} onRename={label => socket.emit('set-contact-label', { jid: contact.jid, label })} privacyMode={privacyMode} platform={contact.platform} expiresAt={contact.expiresAt} lastEventKind={contact.lastEventKind} />)}</div></Suspense>}
+        </section>
+    );
 
     return (
-        <div className="space-y-6">
-            {/* Add Contact Form */}
-            <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200">
-                <div className="flex justify-between items-center mb-4">
-                    <div className="flex items-center gap-4">
-                        <h2 className="text-xl font-semibold text-gray-900">Track Contacts</h2>
-                        {/* Manage Connections button */}
-                        <button
-                            onClick={() => setShowConnections(!showConnections)}
-                            className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1 ${
-                                showConnections
-                                    ? 'bg-gray-700 text-white'
-                                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                            }`}
-                        >
-                            <Settings size={14} />
-                            {showConnections ? 'Hide Connections' : 'Manage Connections'}
-                        </button>
+        <div className="dashboard-stack">
+            <section className="stats-grid" aria-label="Resumo">
+                <div className="stat-panel"><div className="stat-icon"><Users size={19} /></div><span>CONTATOS ATIVOS</span><strong>{entries.length.toString().padStart(2, '0')}</strong><small>Sessões monitoradas</small></div>
+                <div className="stat-panel"><div className="stat-icon"><Activity size={19} /></div><span>AMOSTRAS NESTA TELA</span><strong>{liveSamples.toString().padStart(2, '0')}</strong><small>RTT confirmado</small></div>
+                <div className="stat-panel"><div className="stat-icon"><Radio size={19} /></div><span>CANAIS CONECTADOS</span><strong>{Number(connectionState.whatsapp) + Number(connectionState.signal)}<em>/ 2</em></strong><small>WhatsApp e Signal</small></div>
+            </section>
+
+            {hasActiveSession && contactsSection}
+
+            <section className="panel control-panel">
+                <div className="panel-heading"><div><p className="eyebrow">OPERAÇÃO / NOVA SESSÃO</p><h2>Adicionar contato</h2><p>Monitore apenas números com autorização explícita.</p></div><button type="button" className="button-ghost" onClick={() => setShowConnections(value => !value)}><Settings2 size={16} /> {showConnections ? 'Ocultar conexões' : 'Gerenciar conexões'}</button></div>
+                <form onSubmit={handleAdd}>
+                    <div className="control-grid">
+                        <label className="field"><span>NÚMERO INTERNACIONAL</span><input type="tel" placeholder="Ex.: +55 11 99999-9999" value={inputNumber} onChange={event => setInputNumber(event.target.value)} required />{selectedCountry && <small className="country-hint" aria-live="polite"><span aria-hidden="true">{selectedCountry.flag}</span> {selectedCountry.name} <em>· país do número</em></small>}</label>
+                        <label className="field"><span>NOME / APELIDO</span><input type="text" placeholder="Ex.: Ana — teste 01" maxLength={60} value={inputLabel} onChange={event => setInputLabel(event.target.value)} /></label>
+                        <label className="field"><span>DURAÇÃO</span><select value={durationMinutes ?? 'unlimited'} onChange={event => setDurationMinutes(event.target.value === 'unlimited' ? null : Number(event.target.value))}><option value={1}>1 minuto</option><option value={15}>15 minutos</option><option value={60}>1 hora</option><option value="unlimited">Sem prazo</option></select></label>
                     </div>
-                    <div className="flex items-center gap-4">
-                        {/* Probe Method Toggle */}
-                        <div className="flex items-center gap-2">
-                            <span className="text-sm text-gray-600">Probe Method:</span>
-                            <div className="flex rounded-lg overflow-hidden border border-gray-300">
-                                <button
-                                    onClick={() => handleProbeMethodChange('delete')}
-                                    className={`px-3 py-1.5 text-sm font-medium transition-all duration-200 flex items-center gap-1 ${
-                                        probeMethod === 'delete'
-                                            ? 'bg-purple-600 text-white'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                                    title="Silent Delete Probe - Completely covert, target sees nothing"
-                                >
-                                    <Trash2 size={14} />
-                                    Delete
-                                </button>
-                                <button
-                                    onClick={() => handleProbeMethodChange('reaction')}
-                                    className={`px-3 py-1.5 text-sm font-medium transition-all duration-200 flex items-center gap-1 ${
-                                        probeMethod === 'reaction'
-                                            ? 'bg-yellow-500 text-white'
-                                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                    }`}
-                                    title="Reaction Probe - Sends reactions to non-existent messages"
-                                >
-                                    <Zap size={14} />
-                                    Reaction
-                                </button>
-                            </div>
+                    <div className="control-bottom">
+                        <div className="platform-toggle" role="group" aria-label="Plataforma">
+                            <button type="button" className={selectedPlatform === 'whatsapp' ? 'selected' : ''} disabled={!connectionState.whatsapp} onClick={() => setSelectedPlatform('whatsapp')}><MessageCircle size={16} /> WhatsApp</button>
+                            <button type="button" className={selectedPlatform === 'signal' ? 'selected' : ''} disabled={!connectionState.signal} onClick={() => setSelectedPlatform('signal')}><Radio size={16} /> Signal</button>
                         </div>
-                        {/* Privacy Mode Toggle */}
-                        <button
-                            onClick={() => setPrivacyMode(!privacyMode)}
-                            className={`px-4 py-2 rounded-lg flex items-center gap-2 font-medium transition-all duration-200 ${
-                                privacyMode 
-                                    ? 'bg-green-600 text-white hover:bg-green-700 shadow-md' 
-                                    : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                            }`}
-                            title={privacyMode ? 'Privacy Mode: ON (Click to disable)' : 'Privacy Mode: OFF (Click to enable)'}
-                        >
-                            {privacyMode ? (
-                                <>
-                                    <EyeOff size={20} />
-                                    <span>Privacy ON</span>
-                                </>
-                            ) : (
-                                <>
-                                    <Eye size={20} />
-                                    <span>Privacy OFF</span>
-                                </>
-                            )}
-                        </button>
+                        <button className="button-primary" type="submit" disabled={!consentConfirmed || !notificationsAcknowledged || (durationMinutes === null && !indefiniteAcknowledged) || !inputNumber.trim() || !socket.connected}><Plus size={17} /> Adicionar contato</button>
                     </div>
-                </div>
-                <div className="flex gap-4">
-                    {/* Platform Selector */}
-                    <div className="flex rounded-lg overflow-hidden border border-gray-300">
-                        <button
-                            onClick={() => setSelectedPlatform('whatsapp')}
-                            disabled={!connectionState.whatsapp}
-                            className={`px-4 py-2 text-sm font-medium transition-all duration-200 flex items-center gap-2 ${
-                                selectedPlatform === 'whatsapp'
-                                    ? 'bg-green-600 text-white'
-                                    : connectionState.whatsapp
-                                        ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                            }`}
-                            title={connectionState.whatsapp ? 'WhatsApp' : 'WhatsApp not connected'}
-                        >
-                            <MessageCircle size={16} />
-                            WhatsApp
-                        </button>
-                        <button
-                            onClick={() => setSelectedPlatform('signal')}
-                            disabled={!connectionState.signal}
-                            className={`px-4 py-2 text-sm font-medium transition-all duration-200 flex items-center gap-2 ${
-                                selectedPlatform === 'signal'
-                                    ? 'bg-blue-600 text-white'
-                                    : connectionState.signal
-                                        ? 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                                        : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                            }`}
-                            title={connectionState.signal ? 'Signal' : 'Signal not connected'}
-                        >
-                            <MessageCircle size={16} />
-                            Signal
-                        </button>
+                    <div className="consent-box">
+                        <label><input type="checkbox" checked={consentConfirmed} onChange={event => setConsentConfirmed(event.target.checked)} /> Confirmo que a pessoa autorizou explicitamente esta sessão.</label>
+                        <label><input type="checkbox" checked={notificationsAcknowledged} onChange={event => setNotificationsAcknowledged(event.target.checked)} /> Entendo que as sondas podem gerar notificações no celular a cada 2 segundos, mesmo com esta página fechada, até o término da sessão.</label>
+                        {durationMinutes === null && <label><input type="checkbox" checked={indefiniteAcknowledged} onChange={event => setIndefiniteAcknowledged(event.target.checked)} /> Confirmo que a pessoa autorizou monitoramento sem prazo; ele continuará após reinícios até eu encerrar manualmente.</label>}
                     </div>
-                    <input
-                        type="text"
-                        placeholder="Enter phone number (e.g. 491701234567)"
-                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                        value={inputNumber}
-                        onChange={(e) => setInputNumber(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleAdd()}
-                    />
-                    <button
-                        onClick={handleAdd}
-                        className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium transition-colors"
-                    >
-                        <Plus size={20} /> Add Contact
-                    </button>
-                </div>
-                {error && <p className="mt-2 text-red-500 text-sm">{error}</p>}
-            </div>
+                </form>
+                {error && <p role="alert" className="alert-error">{error}</p>}
+            </section>
 
-            {/* Connections Panel */}
-            {showConnections && (
-                <Login connectionState={connectionState} />
-            )}
+            <section className="dashboard-tools">
+                <div className="tool-group"><span>MÉTODO DE SONDA</span><div className="segmented"><button type="button" className={probeMethod === 'reaction' ? 'active' : ''} disabled={hasActiveSession} onClick={() => socket.emit('set-probe-method', 'reaction')}><Zap size={14} /> Reação</button><button type="button" className={probeMethod === 'delete' ? 'active' : ''} disabled={hasActiveSession} onClick={() => socket.emit('set-probe-method', 'delete')}>Exclusão</button></div>{hasActiveSession && <small>Bloqueado durante sessões ativas</small>}</div>
+                <button type="button" className={`button-ghost privacy-button ${privacyMode ? 'privacy-on' : ''}`} onClick={() => setPrivacyMode(value => !value)}>{privacyMode ? <EyeOff size={16} /> : <Eye size={16} />} Privacidade {privacyMode ? 'ativada' : 'desativada'}</button>
+            </section>
 
-            {/* Contact Cards */}
-            {contacts.size === 0 ? (
-                <div className="bg-gray-50 border-2 border-dashed border-gray-300 rounded-xl p-12 text-center">
-                    <p className="text-gray-500 text-lg">No contacts being tracked</p>
-                    <p className="text-gray-400 text-sm mt-2">Add a contact above to start tracking</p>
-                </div>
-            ) : (
-                <div className="space-y-6">
-                    {Array.from(contacts.values()).map(contact => (
-                        <ContactCard
-                            key={contact.jid}
-                            jid={contact.jid}
-                            displayNumber={contact.contactName}
-                            data={contact.data}
-                            devices={contact.devices}
-                            deviceCount={contact.deviceCount}
-                            presence={contact.presence}
-                            profilePic={contact.profilePic}
-                            onRemove={() => handleRemove(contact.jid)}
-                            privacyMode={privacyMode}
-                            platform={contact.platform}
-                        />
-                    ))}
-                </div>
-            )}
+            {showConnections && <Login connectionState={connectionState} />}
+
+            {!hasActiveSession && contactsSection}
+            <HistoryReport socket={socket} activeSubjects={entries.map(contact => `${contact.platform}:${contact.displayNumber}`)} privacyMode={privacyMode} />
         </div>
     );
 }

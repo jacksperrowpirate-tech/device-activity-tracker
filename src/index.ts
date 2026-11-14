@@ -8,6 +8,7 @@
  */
 
 const debugMode = process.argv.includes('--debug') || process.argv.includes('-d');
+process.umask(0o077);
 const originalConsoleLog = console.log;
 const originalStdoutWrite = process.stdout.write.bind(process.stdout);
 
@@ -63,7 +64,12 @@ import { pino } from 'pino';
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import { WhatsAppTracker } from './tracker.js';
+import { normalizeConsentedNumber } from './security.js';
 import * as readline from 'readline';
+
+if (!process.argv.includes('--acknowledge-notifications')) {
+    throw new Error('Probes can trigger phone notifications. Pass --acknowledge-notifications after obtaining the recipient\'s consent.');
+}
 
 if (debugMode) {
     originalConsoleLog('🔍 Debug mode enabled\n');
@@ -140,15 +146,14 @@ async function connectToWhatsApp() {
 
         rl.question('Enter target phone number (with country code, e.g., 491701234567): ', async (number) => {
             // Basic cleanup
-            const cleanNumber = number.replace(/\D/g, '');
+            const cleanNumber = normalizeConsentedNumber(number);
 
-            if (cleanNumber.length < 10) {
+            if (!cleanNumber) {
                 originalConsoleLog('Invalid number format. Please try again.');
                 rl.close();
                 askForTarget();
                 return;
             }
-
             const targetJid = cleanNumber + '@s.whatsapp.net';
 
             if (debugMode) {

@@ -5,10 +5,14 @@ npm-debug.log
 README.md
 .env
 .env.local
+.env.*
 dist
 build
 client/node_modules
 client/build
 baileys_auth_info
+auth_info_baileys
+data
+client
 *.log
 .DS_Store
