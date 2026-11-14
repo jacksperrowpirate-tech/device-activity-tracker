@@ -154,7 +154,7 @@ The tracker sends probe messages and measures the Round-Trip Time (RTT) to detec
 | Method | Description                                                                                                     |
 |--------|-----------------------------------------------------------------------------------------------------------------|
 | **Delete** (Default) | Sends a "delete" request for a non-existent message ID; can trigger notifications. |
-| **Reaction** | Sends a reaction emoji to a non-existent message ID; may trigger notifications. |
+| **Reaction** | Sends a reaction emoji referencing a non-existent message from the linked account; may trigger notifications. |
 
 ### Detection Logic
 

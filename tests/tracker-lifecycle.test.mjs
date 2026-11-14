@@ -24,6 +24,21 @@ test('stopping a WhatsApp tracker removes its socket listeners', async () => {
     assert.equal(receipts.listenerCount('CB:receipt'), 0);
 });
 
+test('reaction probes refer to a message from the linked account', async () => {
+    const sent = [];
+    const socket = {
+        ev: new EventEmitter(),
+        ws: new EventEmitter(),
+        sendMessage: async (jid, message) => { sent.push({ jid, message }); return null; }
+    };
+    const tracker = new WhatsAppTracker(socket, '491701234567@s.whatsapp.net');
+    await tracker.sendReactionProbe();
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0].message.react.key.fromMe, true);
+    assert.equal(sent[0].message.react.key.remoteJid, sent[0].jid);
+    tracker.stopTracking();
+});
+
 test('a failed Signal send does not classify the target as offline', async () => {
     const previousFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response('failed', { status: 500 });

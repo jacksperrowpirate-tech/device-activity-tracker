@@ -281,7 +281,7 @@ export class WhatsAppTracker {
                     text: randomReaction,
                     key: {
                         remoteJid: this.targetJid,
-                        fromMe: false,
+                        fromMe: true,
                         id: randomMsgId
                     }
                 }
