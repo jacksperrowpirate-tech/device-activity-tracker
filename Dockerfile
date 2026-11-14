@@ -27,4 +27,4 @@ EXPOSE ${PORT}
 # Create directory for WhatsApp auth state
 RUN mkdir -p /app/baileys_auth_info
 
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/main.js"]

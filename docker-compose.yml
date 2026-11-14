@@ -12,12 +12,17 @@ services:
     environment:
       - PORT=${BACKEND_PORT:-3001}
       - SIGNAL_API_URL=${SIGNAL_API_URL:-http://localhost:8080}
+      - CONTACT_STORE=${CONTACT_STORE:-redis}
+      - REDIS_HOST=${REDIS_HOST:-redis}
+      - REDIS_PORT=${REDIS_PORT:-6379}
       - NODE_ENV=${NODE_ENV:-production}
     volumes:
       # Persist WhatsApp auth state
       - baileys_auth:/app/baileys_auth_info
     networks:
       - app-network
+    depends_on:
+      - redis
     restart: unless-stopped
 
   client:
@@ -40,15 +45,28 @@ services:
   signal-api:
     image: bbernhard/signal-cli-rest-api
     ports:
-      - "8080:8080"
+      - "${SIGNAL_API_PORT:-8081}:8080"
     environment:
       - MODE=json-rpc
     restart: unless-stopped
     networks:
       - app-network
 
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+
 volumes:
   baileys_auth:
+    driver: local
+  redis_data:
     driver: local
 
 networks:

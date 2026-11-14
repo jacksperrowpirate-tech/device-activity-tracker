@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import {Eye, EyeOff, Plus, Trash2, Zap, MessageCircle, Settings} from 'lucide-react';
-import { socket, Platform, ConnectionState } from '../App';
+import { Eye, EyeOff, Plus, Trash2, Zap, MessageCircle, Settings } from 'lucide-react';
+import { Platform, ConnectionState } from '../App';
 import { ContactCard } from './ContactCard';
 import { Login } from './Login';
+import { useSocket } from '../providers/SocketProvider';
 
 type ProbeMethod = 'delete' | 'reaction';
 
@@ -39,6 +40,7 @@ interface ContactInfo {
 }
 
 export function Dashboard({ connectionState }: DashboardProps) {
+    const { socket } = useSocket();
     const [inputNumber, setInputNumber] = useState('');
     const [selectedPlatform, setSelectedPlatform] = useState<Platform>(
         connectionState.whatsapp ? 'whatsapp' : 'signal'
@@ -50,6 +52,8 @@ export function Dashboard({ connectionState }: DashboardProps) {
     const [showConnections, setShowConnections] = useState(false);
 
     useEffect(() => {
+        if (!socket) return;
+
         function onTrackerUpdate(update: any) {
             const { jid, ...data } = update;
             if (!jid) return;
@@ -189,7 +193,6 @@ export function Dashboard({ connectionState }: DashboardProps) {
         socket.on('probe-method', onProbeMethod);
         socket.on('tracked-contacts', onTrackedContacts);
 
-        // Request tracked contacts after listeners are set up
         socket.emit('get-tracked-contacts');
 
         return () => {
@@ -202,18 +205,20 @@ export function Dashboard({ connectionState }: DashboardProps) {
             socket.off('probe-method', onProbeMethod);
             socket.off('tracked-contacts', onTrackedContacts);
         };
-    }, []);
+    }, [socket]);
 
     const handleAdd = () => {
-        if (!inputNumber) return;
+        if (!socket || !inputNumber) return;
         socket.emit('add-contact', { number: inputNumber, platform: selectedPlatform });
     };
 
     const handleRemove = (jid: string) => {
+        if (!socket) return;
         socket.emit('remove-contact', jid);
     };
 
     const handleProbeMethodChange = (method: ProbeMethod) => {
+        if (!socket) return;
         socket.emit('set-probe-method', method);
     };
 
