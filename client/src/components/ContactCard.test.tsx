@@ -5,7 +5,7 @@ import { ContactCard } from './ContactCard';
 test('renames a contact and masks the name in privacy mode', () => {
     const onRename = vi.fn();
     const props = {
-        jid: 'test@s.whatsapp.net', displayNumber: '491701234567', data: [], devices: [],
+        jid: 'test@s.whatsapp.net', displayNumber: '491701234567', data: [], recentProbes: [], devices: [],
         deviceCount: 0, presence: null, profilePic: null, onRemove: vi.fn(), onRename
     };
     const view = render(<ContactCard {...props} label="Pessoa A" />);

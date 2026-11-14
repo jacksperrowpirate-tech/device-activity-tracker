@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { Dashboard } from './Dashboard';
 import { vi } from 'vitest';
 
@@ -52,4 +52,20 @@ test('requires separate acknowledgement for a session without a time limit', () 
     expect(mockSocket.emit).toHaveBeenCalledWith('add-contact', expect.objectContaining({
         durationMinutes: null, indefiniteConsentAcknowledged: true
     }));
+});
+
+test('restores chart data and probe quality from the server after remount', async () => {
+    render(<Dashboard connectionState={connectionState} />);
+    const handler = [...mockSocket.on.mock.calls].reverse().find(([event]) => event === 'tracked-contacts')?.[1];
+    expect(handler).toBeDefined();
+    await act(async () => handler([{
+        id: '5561996677010@s.whatsapp.net', platform: 'whatsapp', consentedNumber: '5561996677010',
+        notificationsAcknowledged: true, recentProbes: [
+            { id: '1', kind: 'measurement', timestamp: 1000, rtt: 700, avg: 700, median: 800, threshold: 720, state: 'Standby' },
+            { id: '2', kind: 'no-ack', timestamp: 2000 }
+        ]
+    }]));
+    expect(await screen.findByText('1 AMOSTRAS')).toBeInTheDocument();
+    expect(screen.getByText('50%')).toBeInTheDocument();
+    expect(screen.getByText(/🇧🇷 Brasil/)).toBeInTheDocument();
 });

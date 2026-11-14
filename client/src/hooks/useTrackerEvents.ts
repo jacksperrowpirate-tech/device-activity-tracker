@@ -1,6 +1,7 @@
 import { Dispatch, SetStateAction, useEffect } from 'react';
 import { Socket } from 'socket.io-client';
-import { ContactInfo, DeviceInfo, TrackerData } from '../types/connections';
+import { ContactInfo, DeviceInfo, TelemetrySample, TrackerData } from '../types/connections';
+import { chartDataFromProbes, mergeRecentProbes } from '../utils/telemetry';
 
 interface TrackerUpdate {
     jid?: string;
@@ -11,6 +12,7 @@ interface TrackerUpdate {
     devices?: DeviceInfo[];
     median?: number;
     threshold?: number;
+    sample?: TelemetrySample;
 }
 
 export function useTrackerEvents(
@@ -30,9 +32,14 @@ export function useTrackerEvents(
                 if (data.deviceCount !== undefined) updated.deviceCount = data.deviceCount;
                 if (data.devices !== undefined) updated.devices = data.devices;
                 if (data.eventKind !== undefined) updated.lastEventKind = data.eventKind;
+                else if (data.sample) updated.lastEventKind = data.sample.kind;
+                if (data.sample) {
+                    updated.recentProbes = mergeRecentProbes(updated.recentProbes, [data.sample]);
+                    updated.data = chartDataFromProbes(updated.recentProbes);
+                }
                 const device = data.devices?.find(item => item.jid === data.measuredJid && item.rtt > 0)
                     ?? data.devices?.find(item => item.rtt > 0);
-                if (device && data.eventKind !== 'no-ack' && data.median !== undefined) {
+                if (!data.sample && device && data.eventKind !== 'no-ack' && data.median !== undefined) {
                     const point: TrackerData = {
                         rtt: device.rtt,
                         avg: device.avg,

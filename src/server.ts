@@ -20,6 +20,8 @@ import { isValidMonitorToken, normalizeConsentedNumber, resolveSessionDuration }
 import { createContactRepository, type TrackedContact } from './infra/contact-repository.js';
 import { AdminSessions, clearedSessionCookie, sessionCookie, verifyPassword } from './auth.js';
 import { ActivityHistoryRecorder, createActivityHistoryStore, historySubjectKey, type HistorySubject } from './infra/activity-history.js';
+import { createTelemetryStore, type TelemetrySample } from './infra/telemetry-store.js';
+import { randomUUID } from 'node:crypto';
 
 process.umask(0o077);
 
@@ -129,6 +131,7 @@ const trackers: Map<string, TrackerEntry> = new Map(); // JID/Number -> Tracker 
 const pendingContacts = new Set<string>();
 const repository = await createContactRepository();
 const historyStore = await createActivityHistoryStore();
+const telemetryStore = await createTelemetryStore();
 const activityRecorders = new Map<string, ActivityHistoryRecorder>();
 
 app.get('/api/history/export', async (request, response) => {
@@ -176,6 +179,7 @@ async function removeTrackedContact(id: string) {
     const recorder = activityRecorders.get(id);
     if (recorder) { await recorder.stop(); activityRecorders.delete(id); }
     await repository.remove(id);
+    await telemetryStore.clear(id);
     io.emit('contact-removed', id);
 }
 
@@ -189,7 +193,17 @@ async function prepareActivityRecorder(contact: TrackedContact): Promise<void> {
 }
 
 function publishTrackerUpdate(contact: TrackedContact, data: any): void {
-    io.emit('tracker-update', { jid: contact.id, platform: contact.platform, ...data });
+    const device = data.devices?.find((item: any) => item.jid === data.measuredJid && item.rtt > 0)
+        ?? data.devices?.find((item: any) => item.rtt > 0);
+    let sample: TelemetrySample | undefined;
+    if (data.eventKind === 'no-ack' || (!device && data.devices?.some((item: any) => item.state === 'No ACK'))) {
+        sample = { id: randomUUID(), kind: 'no-ack', timestamp: Date.now() };
+    } else if (device && data.eventKind !== 'no-ack' && Number.isFinite(device.rtt) && device.rtt > 0) {
+        sample = { id: randomUUID(), kind: 'measurement', timestamp: Date.now(), rtt: device.rtt,
+            avg: device.avg, median: data.median, threshold: data.threshold, state: device.state };
+    }
+    io.emit('tracker-update', { jid: contact.id, platform: contact.platform, ...data, sample });
+    if (sample) void telemetryStore.append(contact.id, sample).catch(error => console.error('Could not save telemetry sample', error));
     const recorder = activityRecorders.get(contact.id);
     if (recorder) void recorder.observe(data).catch(error => console.error('Could not record activity estimate', error));
 }
@@ -483,7 +497,10 @@ io.on('connection', (socket) => {
     // Handle request to get tracked contacts (for page refresh)
     socket.on('get-tracked-contacts', async () => {
         try {
-            socket.emit('tracked-contacts', (await repository.list()).filter(contact => trackers.has(contact.id)));
+            const contacts = (await repository.list()).filter(contact => trackers.has(contact.id));
+            socket.emit('tracked-contacts', await Promise.all(contacts.map(async contact => ({
+                ...contact, recentProbes: await telemetryStore.recent(contact.id)
+            }))));
         } catch (error) {
             console.error('Failed to list saved contacts', error);
             socket.emit('error', { message: 'Could not load saved contacts.' });

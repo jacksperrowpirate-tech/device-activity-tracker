@@ -1,10 +1,12 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import { Activity, Eye, EyeOff, MessageCircle, Plus, Radio, Settings2, ShieldCheck, Users, Zap } from 'lucide-react';
-import { Platform, ConnectionState, ContactInfo, ProbeMethod } from '../types/connections';
+import { Platform, ConnectionState, ContactInfo, ProbeMethod, TelemetrySample } from '../types/connections';
 import { Login } from './Login';
 import { useSocket } from '../providers/SocketProvider';
 import { useTrackerEvents } from '../hooks/useTrackerEvents';
 import { HistoryReport } from './HistoryReport';
+import { chartDataFromProbes, mergeRecentProbes } from '../utils/telemetry';
+import { phoneCountry } from '../utils/phone-country';
 
 const ContactCard = React.lazy(() => import('./ContactCard').then(module => ({ default: module.ContactCard })));
 
@@ -25,6 +27,7 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
     const entries = Array.from(contacts.values());
     const hasActiveSession = entries.length > 0;
     const liveSamples = entries.reduce((sum, contact) => sum + contact.data.length, 0);
+    const selectedCountry = phoneCountry(inputNumber);
 
     useTrackerEvents(socket, setContacts);
 
@@ -55,7 +58,7 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
                 const next = new Map(prev);
                 const existing = next.get(jid);
                 next.set(jid, existing ? { ...existing, label: label ?? existing.label, expiresAt } : {
-                    jid, displayNumber: number, contactName: number, label, data: [], devices: [],
+                    jid, displayNumber: number, contactName: number, label, data: [], recentProbes: [], devices: [],
                     deviceCount: 0, presence: null, profilePic: null, platform, expiresAt
                 });
                 return next;
@@ -66,14 +69,15 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
             const next = new Map(prev); next.delete(jid); return next;
         });
         const onError = (data: { message: string }) => setError(data.message);
-        const onTrackedContacts = (saved: { id: string; platform: Platform; consentedNumber?: string; label?: string; expiresAt?: number }[]) => setContacts(prev => {
+        const onTrackedContacts = (saved: { id: string; platform: Platform; consentedNumber?: string; label?: string; expiresAt?: number; recentProbes?: TelemetrySample[] }[]) => setContacts(prev => {
             const next = new Map<string, ContactInfo>();
-            for (const { id, platform, consentedNumber, label, expiresAt } of saved) {
+            for (const { id, platform, consentedNumber, label, expiresAt, recentProbes } of saved) {
                 const previous = prev.get(id);
                 const number = consentedNumber || (platform === 'signal' ? id.replace('signal:', '') : id.split('@')[0]);
-                next.set(id, previous ? { ...previous, label, expiresAt } : {
-                    jid: id, displayNumber: number, contactName: number, label, data: [], devices: [],
-                    deviceCount: 0, presence: null, profilePic: null, platform, expiresAt
+                const restored = mergeRecentProbes(recentProbes || [], previous?.recentProbes || []);
+                next.set(id, previous ? { ...previous, label, expiresAt, recentProbes: restored, data: chartDataFromProbes(restored), lastEventKind: restored.at(-1)?.kind ?? previous.lastEventKind } : {
+                    jid: id, displayNumber: number, contactName: number, label, data: chartDataFromProbes(restored), recentProbes: restored, devices: [],
+                    deviceCount: 0, presence: null, profilePic: null, platform, expiresAt, lastEventKind: restored.at(-1)?.kind
                 });
             }
             return next;
@@ -87,8 +91,11 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
         socket.on('error', onError);
         socket.on('probe-method', setProbeMethod);
         socket.on('tracked-contacts', onTrackedContacts);
-        socket.emit('get-tracked-contacts');
+        const loadContacts = () => socket.emit('get-tracked-contacts');
+        socket.on('connect', loadContacts);
+        loadContacts();
         return () => {
+            socket.off('connect', loadContacts);
             socket.off('profile-pic', onProfilePic);
             socket.off('contact-name', onContactName);
             socket.off('contact-label', onContactLabel);
@@ -123,7 +130,7 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
                 <div className="panel-heading"><div><p className="eyebrow">OPERAÇÃO / NOVA SESSÃO</p><h2>Adicionar contato</h2><p>Monitore apenas números com autorização explícita.</p></div><button type="button" className="button-ghost" onClick={() => setShowConnections(value => !value)}><Settings2 size={16} /> {showConnections ? 'Ocultar conexões' : 'Gerenciar conexões'}</button></div>
                 <form onSubmit={handleAdd}>
                     <div className="control-grid">
-                        <label className="field"><span>NÚMERO INTERNACIONAL</span><input type="tel" placeholder="Ex.: +55 11 99999-9999" value={inputNumber} onChange={event => setInputNumber(event.target.value)} required /></label>
+                        <label className="field"><span>NÚMERO INTERNACIONAL</span><input type="tel" placeholder="Ex.: +55 11 99999-9999" value={inputNumber} onChange={event => setInputNumber(event.target.value)} required />{selectedCountry && <small className="country-hint" aria-live="polite"><span aria-hidden="true">{selectedCountry.flag}</span> {selectedCountry.name} <em>· país do número</em></small>}</label>
                         <label className="field"><span>NOME / APELIDO</span><input type="text" placeholder="Ex.: Ana — teste 01" maxLength={60} value={inputLabel} onChange={event => setInputLabel(event.target.value)} /></label>
                         <label className="field"><span>DURAÇÃO</span><select value={durationMinutes ?? 'unlimited'} onChange={event => setDurationMinutes(event.target.value === 'unlimited' ? null : Number(event.target.value))}><option value={1}>1 minuto</option><option value={15}>15 minutos</option><option value={60}>1 hora</option><option value="unlimited">Sem prazo</option></select></label>
                     </div>
@@ -151,7 +158,7 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
             {showConnections && <Login connectionState={connectionState} />}
 
             <section className="contacts-section"><div className="section-heading"><div><p className="eyebrow"><i className="pulse-dot" /> TELEMETRIA AO VIVO</p><h2>Contatos monitorados <span>{entries.length}</span></h2></div><div className="section-note"><ShieldCheck size={15} /> Medições são estimativas de latência</div></div>
-                {entries.length === 0 ? <div className="empty-state"><Radio size={32} /><h3>Nenhuma sessão ativa</h3><p>Adicione um contato autorizado para ver os sinais aqui.</p></div> : <Suspense fallback={<div className="empty-state">Carregando sinais...</div>}><div className="contacts-grid">{entries.map(contact => <ContactCard key={contact.jid} jid={contact.jid} label={contact.label} displayNumber={contact.displayNumber} data={contact.data} devices={contact.devices} deviceCount={contact.deviceCount} presence={contact.presence} profilePic={contact.profilePic} onRemove={() => socket.emit('remove-contact', contact.jid)} onRename={label => socket.emit('set-contact-label', { jid: contact.jid, label })} privacyMode={privacyMode} platform={contact.platform} expiresAt={contact.expiresAt} lastEventKind={contact.lastEventKind} />)}</div></Suspense>}
+                {entries.length === 0 ? <div className="empty-state"><Radio size={32} /><h3>Nenhuma sessão ativa</h3><p>Adicione um contato autorizado para ver os sinais aqui.</p></div> : <Suspense fallback={<div className="empty-state">Carregando sinais...</div>}><div className="contacts-grid">{entries.map(contact => <ContactCard key={contact.jid} jid={contact.jid} label={contact.label} displayNumber={contact.displayNumber} data={contact.data} recentProbes={contact.recentProbes} devices={contact.devices} deviceCount={contact.deviceCount} presence={contact.presence} profilePic={contact.profilePic} onRemove={() => socket.emit('remove-contact', contact.jid)} onRename={label => socket.emit('set-contact-label', { jid: contact.jid, label })} privacyMode={privacyMode} platform={contact.platform} expiresAt={contact.expiresAt} lastEventKind={contact.lastEventKind} />)}</div></Suspense>}
             </section>
             <HistoryReport socket={socket} activeSubjects={entries.map(contact => `${contact.platform}:${contact.displayNumber}`)} privacyMode={privacyMode} />
         </div>

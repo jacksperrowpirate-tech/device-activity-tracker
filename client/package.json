@@ -4,6 +4,7 @@
   "private": true,
   "dependencies": {
     "clsx": "^2.1.1",
+    "libphonenumber-js": "^1.13.16",
     "lucide-react": "^0.556.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.1",

@@ -99,6 +99,8 @@ Tracked contacts are saved in Redis by default or in `data/contacts.json` with `
 
 **Activity history:** The report saves intervals that the RTT heuristic classified as “Online” after three consecutive confirmations and closes them after three consecutive “Standby” or missing-ACK events. It shows start, end, duration, sample count, and mean RTT, and exports CSV. These are **estimated periods**, not confirmed app presence: in a live test an open WhatsApp session was labeled “Standby.” History persists after tracking stops in Redis (or `data/activity-history.json` with `CONTACT_STORE=file`) until explicitly deleted from the report. Only new measurements after this feature is enabled are recorded automatically.
 
+**Recent chart:** The backend saves the last 240 probe results per active contact in Redis (or `data/telemetry.json` with `CONTACT_STORE=file`). The chart shows up to 120 confirmed RTT measurements and reloads them after F5, logout/login, or backend restart. Each card also shows the recent confirmation rate and last confirmed time. Ending a session clears its recent chart; the activity report remains available. The country flag comes from the phone prefix and does not indicate the person's current location.
+
 ### Environment Variables
 
 | Variable | Default | Description |

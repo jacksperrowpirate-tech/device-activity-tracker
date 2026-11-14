@@ -19,6 +19,17 @@ export interface TrackerData {
     timestamp: number;
 }
 
+export interface TelemetrySample {
+    id: string;
+    kind: 'measurement' | 'no-ack';
+    timestamp: number;
+    rtt?: number;
+    avg?: number;
+    median?: number;
+    threshold?: number;
+    state?: string;
+}
+
 export interface DeviceInfo {
     jid: string;
     state: string;
@@ -32,6 +43,7 @@ export interface ContactInfo {
     contactName: string;
     label?: string;
     data: TrackerData[];
+    recentProbes: TelemetrySample[];
     devices: DeviceInfo[];
     deviceCount: number;
     presence: string | null;
