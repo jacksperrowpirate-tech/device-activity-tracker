@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { Activity, Eye, EyeOff, MessageCircle, Plus, Radio, Settings2, ShieldCheck, Users, Zap } from 'lucide-react';
 import { Platform, ConnectionState, ContactInfo, ProbeMethod, TelemetrySample } from '../types/connections';
 import { Login } from './Login';
@@ -21,7 +21,8 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
     const [error, setError] = useState<string | null>(null);
     const [privacyMode, setPrivacyMode] = useState(false);
     const [probeMethod, setProbeMethod] = useState<ProbeMethod>('reaction');
-    const [showConnections, setShowConnections] = useState(!connectionState.whatsapp && !connectionState.signal);
+    const [showConnections, setShowConnections] = useState(false);
+    const connectionsWereUnavailable = useRef(!connectionState.whatsapp && !connectionState.signal);
     const [consentConfirmed, setConsentConfirmed] = useState(false);
     const [notificationsAcknowledged, setNotificationsAcknowledged] = useState(false);
     const entries = Array.from(contacts.values());
@@ -34,7 +35,10 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
     useEffect(() => {
         if (selectedPlatform === 'whatsapp' && !connectionState.whatsapp && connectionState.signal) setSelectedPlatform('signal');
         if (selectedPlatform === 'signal' && !connectionState.signal && connectionState.whatsapp) setSelectedPlatform('whatsapp');
-        if (!connectionState.whatsapp && !connectionState.signal) setShowConnections(true);
+        const unavailable = !connectionState.whatsapp && !connectionState.signal;
+        if (unavailable) setShowConnections(true);
+        else if (connectionsWereUnavailable.current) setShowConnections(false);
+        connectionsWereUnavailable.current = unavailable;
     }, [connectionState.whatsapp, connectionState.signal, selectedPlatform]);
 
     useEffect(() => {
@@ -118,6 +122,12 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
         });
     }
 
+    const contactsSection = (
+        <section className="contacts-section"><div className="section-heading"><div><p className="eyebrow"><i className="pulse-dot" /> TELEMETRIA AO VIVO</p><h2>Contatos monitorados <span>{entries.length}</span></h2></div><div className="section-note"><ShieldCheck size={15} /> Medições são estimativas de latência</div></div>
+            {entries.length === 0 ? <div className="empty-state"><Radio size={32} /><h3>Nenhuma sessão ativa</h3><p>Adicione um contato autorizado para ver os sinais aqui.</p></div> : <Suspense fallback={<div className="empty-state">Carregando sinais...</div>}><div className="contacts-grid">{entries.map(contact => <ContactCard key={contact.jid} jid={contact.jid} label={contact.label} displayNumber={contact.displayNumber} data={contact.data} recentProbes={contact.recentProbes} devices={contact.devices} deviceCount={contact.deviceCount} presence={contact.presence} profilePic={contact.profilePic} onRemove={() => socket.emit('remove-contact', contact.jid)} onRename={label => socket.emit('set-contact-label', { jid: contact.jid, label })} privacyMode={privacyMode} platform={contact.platform} expiresAt={contact.expiresAt} lastEventKind={contact.lastEventKind} />)}</div></Suspense>}
+        </section>
+    );
+
     return (
         <div className="dashboard-stack">
             <section className="stats-grid" aria-label="Resumo">
@@ -125,6 +135,8 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
                 <div className="stat-panel"><div className="stat-icon"><Activity size={19} /></div><span>AMOSTRAS NESTA TELA</span><strong>{liveSamples.toString().padStart(2, '0')}</strong><small>RTT confirmado</small></div>
                 <div className="stat-panel"><div className="stat-icon"><Radio size={19} /></div><span>CANAIS CONECTADOS</span><strong>{Number(connectionState.whatsapp) + Number(connectionState.signal)}<em>/ 2</em></strong><small>WhatsApp e Signal</small></div>
             </section>
+
+            {hasActiveSession && contactsSection}
 
             <section className="panel control-panel">
                 <div className="panel-heading"><div><p className="eyebrow">OPERAÇÃO / NOVA SESSÃO</p><h2>Adicionar contato</h2><p>Monitore apenas números com autorização explícita.</p></div><button type="button" className="button-ghost" onClick={() => setShowConnections(value => !value)}><Settings2 size={16} /> {showConnections ? 'Ocultar conexões' : 'Gerenciar conexões'}</button></div>
@@ -157,9 +169,7 @@ export function Dashboard({ connectionState }: { connectionState: ConnectionStat
 
             {showConnections && <Login connectionState={connectionState} />}
 
-            <section className="contacts-section"><div className="section-heading"><div><p className="eyebrow"><i className="pulse-dot" /> TELEMETRIA AO VIVO</p><h2>Contatos monitorados <span>{entries.length}</span></h2></div><div className="section-note"><ShieldCheck size={15} /> Medições são estimativas de latência</div></div>
-                {entries.length === 0 ? <div className="empty-state"><Radio size={32} /><h3>Nenhuma sessão ativa</h3><p>Adicione um contato autorizado para ver os sinais aqui.</p></div> : <Suspense fallback={<div className="empty-state">Carregando sinais...</div>}><div className="contacts-grid">{entries.map(contact => <ContactCard key={contact.jid} jid={contact.jid} label={contact.label} displayNumber={contact.displayNumber} data={contact.data} recentProbes={contact.recentProbes} devices={contact.devices} deviceCount={contact.deviceCount} presence={contact.presence} profilePic={contact.profilePic} onRemove={() => socket.emit('remove-contact', contact.jid)} onRename={label => socket.emit('set-contact-label', { jid: contact.jid, label })} privacyMode={privacyMode} platform={contact.platform} expiresAt={contact.expiresAt} lastEventKind={contact.lastEventKind} />)}</div></Suspense>}
-            </section>
+            {!hasActiveSession && contactsSection}
             <HistoryReport socket={socket} activeSubjects={entries.map(contact => `${contact.platform}:${contact.displayNumber}`)} privacyMode={privacyMode} />
         </div>
     );

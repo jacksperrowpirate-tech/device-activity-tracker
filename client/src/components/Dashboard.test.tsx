@@ -69,3 +69,13 @@ test('restores chart data and probe quality from the server after remount', asyn
     expect(screen.getByText('50%')).toBeInTheDocument();
     expect(screen.getByText(/🇧🇷 Brasil/)).toBeInTheDocument();
 });
+
+test('keeps connection setup out of the way after a channel connects', () => {
+    const disconnected = { ...connectionState, whatsapp: false };
+    const view = render(<Dashboard connectionState={disconnected} />);
+    expect(screen.getByRole('region', { name: 'Conexões' })).toBeInTheDocument();
+    view.rerender(<Dashboard connectionState={connectionState} />);
+    expect(screen.queryByRole('region', { name: 'Conexões' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /gerenciar conexões/i }));
+    expect(screen.getByRole('region', { name: 'Conexões' })).toBeInTheDocument();
+});
