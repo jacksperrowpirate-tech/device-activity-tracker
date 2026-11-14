@@ -28,6 +28,7 @@
   "scripts": {
     "build": "tsc",
     "test": "npm run build && node --test tests/*.test.mjs",
+    "setup:admin": "npm run build && node scripts/setup-admin.mjs",
     "start": "npx tsx src/index.ts",
     "start:server": "tsx src/main.ts",
     "start:signal-api": "npx tsx src/scripts/init-signal.ts",

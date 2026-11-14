@@ -16,39 +16,98 @@ import { pino } from 'pino';
 import { Boom } from '@hapi/boom';
 import { WhatsAppTracker, ProbeMethod } from './tracker.js';
 import { SignalTracker, getSignalAccounts, checkSignalNumber } from './signal-tracker.js';
-import { isValidAdminToken, normalizeConsentedNumber } from './security.js';
+import { isValidMonitorToken, normalizeConsentedNumber } from './security.js';
 import { createContactRepository, type TrackedContact } from './infra/contact-repository.js';
+import { AdminSessions, clearedSessionCookie, sessionCookie, verifyPassword } from './auth.js';
 
 process.umask(0o077);
 
 // Configuration
 const SIGNAL_API_URL = process.env.SIGNAL_API_URL || 'http://localhost:8080';
-const ADMIN_TOKEN = process.env.ADMIN_TOKEN;
-if (!ADMIN_TOKEN || ADMIN_TOKEN.length < 24) {
-    throw new Error('ADMIN_TOKEN must be configured with at least 24 characters');
-}
+const MONITOR_TOKEN = process.env.MONITOR_TOKEN;
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD_HASH = process.env.ADMIN_PASSWORD_HASH;
+if (!ADMIN_PASSWORD_HASH) throw new Error('ADMIN_PASSWORD_HASH must be configured');
+if (MONITOR_TOKEN && MONITOR_TOKEN.length < 24) throw new Error('Monitor token is too short');
+const secureCookies = process.env.PUBLIC_HTTPS === 'true';
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
     .split(',').map(origin => origin.trim()).filter(Boolean);
 const consentedNumbers = new Set((process.env.CONSENTED_NUMBERS || '')
     .split(',').map(normalizeConsentedNumber).filter((number): number is string => number !== null));
 
 const app = express();
-app.use(cors({ origin: allowedOrigins }));
+app.use(cors({ origin: allowedOrigins, credentials: true }));
+app.use(express.json({ limit: '2kb' }));
 app.get('/health', (_request, response) => response.json({ status: 'ok' }));
+const sessions = new AdminSessions();
+const loginFailures = new Map<string, { count: number; until: number }>();
+const loginWindowMs = 15 * 60_000;
+
+app.use('/api/auth', (request, response, next) => {
+    response.setHeader('Cache-Control', 'no-store');
+    const origin = request.headers.origin;
+    if (origin && !allowedOrigins.includes(origin)) {
+        response.status(403).json({ message: 'Origin not allowed' });
+        return;
+    }
+    next();
+});
+
+app.get('/api/auth/session', async (request, response) => {
+    try {
+        if (await sessions.valid(request.headers.cookie)) response.json({ username: ADMIN_USERNAME });
+        else response.status(401).json({ message: 'Not signed in' });
+    } catch { response.status(503).json({ message: 'Session service unavailable' }); }
+});
+
+app.post('/api/auth/login', async (request, response) => {
+    const key = request.ip || 'unknown';
+    const now = Date.now();
+    const failures = loginFailures.get(key);
+    if (failures && failures.count >= 5 && failures.until > now) {
+        response.status(429).json({ message: 'Too many attempts. Try again later.' });
+        return;
+    }
+    const username = request.body?.username;
+    const password = request.body?.password;
+    try {
+        const validPassword = await verifyPassword(password, ADMIN_PASSWORD_HASH);
+        if (username !== ADMIN_USERNAME || !validPassword) {
+            loginFailures.set(key, { count: (failures && failures.until > now ? failures.count : 0) + 1, until: now + loginWindowMs });
+            response.status(401).json({ message: 'Invalid username or password' });
+            return;
+        }
+        loginFailures.delete(key);
+        const token = await sessions.create();
+        response.setHeader('Set-Cookie', sessionCookie(token, secureCookies));
+        response.json({ username: ADMIN_USERNAME });
+    } catch { response.status(503).json({ message: 'Login unavailable' }); }
+});
+
+app.post('/api/auth/logout', async (request, response) => {
+    try { await sessions.revoke(request.headers.cookie); } catch { /* Clear browser cookie even if Redis is unavailable. */ }
+    response.setHeader('Set-Cookie', clearedSessionCookie(secureCookies));
+    response.status(204).end();
+});
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
         origin: allowedOrigins,
-        methods: ["GET", "POST"]
+        methods: ["GET", "POST"],
+        credentials: true
     },
     allowRequest: (request, callback) => {
         const origin = request.headers.origin;
         callback(null, !origin || allowedOrigins.includes(origin));
     }
 });
-io.use((socket, next) => {
-    if (isValidAdminToken(socket.handshake.auth?.token, ADMIN_TOKEN)) return next();
+io.use(async (socket, next) => {
+    try {
+        if (await sessions.valid(socket.handshake.headers.cookie)) return next();
+        // Existing local experiment collectors use this temporary internal credential.
+        if (MONITOR_TOKEN && isValidMonitorToken(socket.handshake.auth?.token, MONITOR_TOKEN)) return next();
+    } catch { /* Fail closed when the session store is unavailable. */ }
     next(new Error('Unauthorized'));
 });
 
@@ -97,6 +156,13 @@ function scheduleExpiry(contact: TrackedContact) {
     expiryTimers.set(contact.id, timer);
 }
 
+function normalizeLabel(value: unknown): string | null {
+    if (value === undefined || value === null || value === '') return '';
+    if (typeof value !== 'string') return null;
+    const label = value.trim();
+    return label.length <= 60 && !/[\x00-\x1f\x7f]/.test(label) ? label : null;
+}
+
 function scheduleWhatsAppReconnect() {
     if (reconnectTimer) return;
     reconnectTimer = setTimeout(() => {
@@ -143,7 +209,7 @@ async function rehydratePlatform(platform: Platform) {
             }
             if (trackers.has(contact.id)) {
                 scheduleExpiry(contact);
-                io.emit('contact-added', { jid: contact.id, number, platform, expiresAt: contact.expiresAt });
+                io.emit('contact-added', { jid: contact.id, number, label: contact.label, platform, expiresAt: contact.expiresAt });
             }
         } catch (error) {
             trackers.get(contact.id)?.tracker.stopTracking();
@@ -373,11 +439,12 @@ io.on('connection', (socket) => {
     });
 
     // Add contact - supports both WhatsApp and Signal
-    socket.on('add-contact', async (data: { number?: unknown; platform?: unknown; consent?: unknown; notificationsAcknowledged?: unknown; durationMinutes?: unknown } | null) => {
+    socket.on('add-contact', async (data: { number?: unknown; platform?: unknown; label?: unknown; consent?: unknown; notificationsAcknowledged?: unknown; durationMinutes?: unknown } | null) => {
         const cleanNumber = normalizeConsentedNumber(data?.number);
+        const label = normalizeLabel(data?.label);
         const platform = data?.platform;
-        if (!cleanNumber || (platform !== 'signal' && platform !== 'whatsapp')) {
-            socket.emit('error', { message: 'Enter a valid international number and platform.' });
+        if (!cleanNumber || label === null || (platform !== 'signal' && platform !== 'whatsapp')) {
+            socket.emit('error', { message: 'Enter a valid international number, name and platform.' });
             return;
         }
         if (data?.consent !== true || !consentedNumbers.has(cleanNumber)) {
@@ -450,13 +517,14 @@ io.on('connection', (socket) => {
                     };
 
                     await tracker.startTracking();
-                    const contact: TrackedContact = { id: signalId, platform: 'signal', consentedNumber: cleanNumber, notificationsAcknowledged: true, expiresAt };
+                    const contact: TrackedContact = { id: signalId, platform: 'signal', consentedNumber: cleanNumber, label: label || undefined, notificationsAcknowledged: true, expiresAt };
                     await repository.save(contact);
                     scheduleExpiry(contact);
 
                     io.emit('contact-added', {
                         jid: signalId,
                         number: cleanNumber,
+                        label: label || undefined,
                         platform: 'signal',
                         expiresAt
                     });
@@ -506,6 +574,7 @@ io.on('connection', (socket) => {
                             id: result.jid,
                             platform: 'whatsapp',
                             consentedNumber: cleanNumber,
+                            label: label || undefined,
                             notificationsAcknowledged: true,
                             expiresAt,
                             probeMethod: globalProbeMethod
@@ -528,6 +597,7 @@ io.on('connection', (socket) => {
                         io.emit('contact-added', {
                             jid: result.jid,
                             number: cleanNumber,
+                            label: label || undefined,
                             platform: 'whatsapp',
                             expiresAt
                         });
@@ -559,6 +629,20 @@ io.on('connection', (socket) => {
             console.error('Failed to remove saved contact', error);
             socket.emit('error', { message: 'Could not remove saved contact.' });
         }
+    });
+
+    socket.on('set-contact-label', async (data: { jid?: unknown; label?: unknown } | null) => {
+        const label = normalizeLabel(data?.label);
+        if (typeof data?.jid !== 'string' || label === null || !trackers.has(data.jid)) {
+            socket.emit('error', { message: 'Choose an active contact and a name of up to 60 characters.' });
+            return;
+        }
+        try {
+            const contact = (await repository.list()).find(item => item.id === data.jid);
+            if (!contact) throw new Error('Contact unavailable');
+            await repository.save({ ...contact, label: label || undefined });
+            io.emit('contact-label', { jid: data.jid, label: label || undefined });
+        } catch { socket.emit('error', { message: 'Could not save contact name.' }); }
     });
 
     socket.on('set-probe-method', async (method: ProbeMethod) => {

@@ -13,12 +13,12 @@ test('file repository persists concurrent changes and removes contacts', async (
         const expiresAt = Date.now() + 60_000;
         assert.deepEqual(await repository.list(), []);
         await Promise.all([
-            repository.save({ id: '491701234567@s.whatsapp.net', platform: 'whatsapp', consentedNumber: '491701234567', notificationsAcknowledged: true, expiresAt, probeMethod: 'reaction' }),
+            repository.save({ id: '491701234567@s.whatsapp.net', platform: 'whatsapp', consentedNumber: '491701234567', label: 'Pessoa A', notificationsAcknowledged: true, expiresAt, probeMethod: 'reaction' }),
             repository.save({ id: 'signal:491701234568', platform: 'signal', consentedNumber: '491701234568', notificationsAcknowledged: true })
         ]);
         assert.equal((await repository.list()).length, 2);
         await repository.remove('signal:491701234568');
-        assert.deepEqual(await repository.list(), [{ id: '491701234567@s.whatsapp.net', platform: 'whatsapp', consentedNumber: '491701234567', notificationsAcknowledged: true, expiresAt, probeMethod: 'reaction' }]);
+        assert.deepEqual(await repository.list(), [{ id: '491701234567@s.whatsapp.net', platform: 'whatsapp', consentedNumber: '491701234567', label: 'Pessoa A', notificationsAcknowledged: true, expiresAt, probeMethod: 'reaction' }]);
         assert.equal(JSON.parse(await readFile(filename, 'utf8')).length, 1);
         await repository.close();
     } finally {

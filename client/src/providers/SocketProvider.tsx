@@ -9,8 +9,8 @@ interface SocketContextValue {
 const SocketContext = createContext<SocketContextValue | null>(null);
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
-export function SocketProvider({ token, children }: { token: string; children: React.ReactNode }) {
-    const socket = useMemo(() => io(API_URL, { autoConnect: false, auth: { token } }), [token]);
+export function SocketProvider({ children }: { children: React.ReactNode }) {
+    const socket = useMemo(() => io(API_URL, { autoConnect: false, withCredentials: true }), []);
     const [authError, setAuthError] = useState<string | null>(null);
 
     useEffect(() => {

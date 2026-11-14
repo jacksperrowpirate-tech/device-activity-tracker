@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 
-export function isValidAdminToken(candidate: unknown, expected: string): boolean {
+export function isValidMonitorToken(candidate: unknown, expected: string): boolean {
     if (typeof candidate !== 'string') return false;
     const actual = Buffer.from(candidate);
     const secret = Buffer.from(expected);

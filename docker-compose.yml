@@ -6,11 +6,14 @@ services:
       args:
         - PORT=${BACKEND_PORT:-3001}
     ports:
-      - "${BACKEND_PORT:-3001}:${BACKEND_PORT:-3001}"
+      - "${BIND_HOST:-127.0.0.1}:${BACKEND_PORT:-3001}:${BACKEND_PORT:-3001}"
     environment:
       - PORT=${BACKEND_PORT:-3001}
       - SIGNAL_API_URL=http://signal-api:8080
-      - ADMIN_TOKEN=${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD_HASH=${ADMIN_PASSWORD_HASH:?Set ADMIN_PASSWORD_HASH in .env}
+      - MONITOR_TOKEN=${MONITOR_TOKEN:-}
+      - PUBLIC_HTTPS=${PUBLIC_HTTPS:-false}
       - CONSENTED_NUMBERS=${CONSENTED_NUMBERS:-}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
       - CONTACT_STORE=${CONTACT_STORE:-redis}
@@ -40,7 +43,7 @@ services:
         - PORT=${CLIENT_PORT:-3000}
         - VITE_API_URL=${BACKEND_URL:-http://localhost:3001}
     ports:
-      - "${CLIENT_PORT:-3000}:${CLIENT_PORT:-3000}"
+      - "${BIND_HOST:-127.0.0.1}:${CLIENT_PORT:-3000}:${CLIENT_PORT:-3000}"
     environment:
       - PORT=${CLIENT_PORT:-3000}
     depends_on:

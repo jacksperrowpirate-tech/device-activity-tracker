@@ -23,17 +23,18 @@ const connectionState = {
     whatsappQr: null
 };
 
-test('requires consent and notification acknowledgement before requesting contact tracking', () => {
+test('requires consent and notification acknowledgement before requesting a timed session', () => {
     render(<Dashboard connectionState={connectionState} />);
-    const addButton = screen.getByRole('button', { name: /add contact/i });
-    fireEvent.change(screen.getByPlaceholderText(/enter phone number/i), { target: { value: '491701234567' } });
+    const addButton = screen.getByRole('button', { name: /adicionar contato/i });
+    fireEvent.change(screen.getByPlaceholderText(/ex.: \+55/i), { target: { value: '491701234567' } });
+    fireEvent.change(screen.getByPlaceholderText(/ana/i), { target: { value: 'Pessoa A' } });
     expect(addButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox', { name: /explicitly consented/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /autorizou explicitamente/i }));
     expect(addButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox', { name: /probes can trigger phone notifications/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /sondas podem gerar notificações/i }));
     expect(addButton).toBeEnabled();
     fireEvent.click(addButton);
     expect(mockSocket.emit).toHaveBeenCalledWith('add-contact', {
-        number: '491701234567', platform: 'whatsapp', consent: true, notificationsAcknowledged: true
+        number: '491701234567', label: 'Pessoa A', platform: 'whatsapp', consent: true, notificationsAcknowledged: true, durationMinutes: 60
     });
 });

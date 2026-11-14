@@ -30,6 +30,7 @@ export interface ContactInfo {
     jid: string;
     displayNumber: string;
     contactName: string;
+    label?: string;
     data: TrackerData[];
     devices: DeviceInfo[];
     deviceCount: number;

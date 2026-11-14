@@ -1,28 +1,11 @@
-import React from 'react';
+import { useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Square, Activity, Wifi, Smartphone, Monitor, MessageCircle } from 'lucide-react';
-import clsx from 'clsx';
-
-type Platform = 'whatsapp' | 'signal';
-
-interface TrackerData {
-    rtt: number;
-    avg: number;
-    median: number;
-    threshold: number;
-    state: string;
-    timestamp: number;
-}
-
-interface DeviceInfo {
-    jid: string;
-    state: string;
-    rtt: number;
-    avg: number;
-}
+import { Activity, Check, Clock3, MessageCircle, Pencil, Radio, Square, X } from 'lucide-react';
+import { DeviceInfo, Platform, TrackerData } from '../types/connections';
 
 interface ContactCardProps {
     jid: string;
+    label?: string;
     displayNumber: string;
     data: TrackerData[];
     devices: DeviceInfo[];
@@ -30,182 +13,49 @@ interface ContactCardProps {
     presence: string | null;
     profilePic: string | null;
     onRemove: () => void;
+    onRename: (label: string) => void;
     privacyMode?: boolean;
     platform?: Platform;
     expiresAt?: number;
     lastEventKind?: 'measurement' | 'no-ack';
 }
 
-export function ContactCard({
-    jid,
-    displayNumber,
-    data,
-    devices,
-    deviceCount,
-    presence,
-    profilePic,
-    onRemove,
-    privacyMode = false,
-    platform = 'whatsapp',
-    expiresAt,
-    lastEventKind
-}: ContactCardProps) {
-    const lastData = data[data.length - 1];
-    const currentStatus = lastEventKind === 'no-ack' ? 'No ACK' : devices.length > 0
-        ? (devices.find(d => d.state === 'Online')?.state ||
-            devices.find(d => d.state === 'Standby')?.state ||
-            devices.find(d => d.state === 'Calibrating...')?.state ||
-            devices.find(d => d.state === 'Delayed ACK')?.state ||
-            devices[0].state)
-        : 'Unknown';
+export function ContactCard({ label, displayNumber, data, devices, deviceCount, onRemove, onRename, privacyMode = false, platform = 'whatsapp', expiresAt, lastEventKind }: ContactCardProps) {
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState(label || '');
+    const latest = data.at(-1);
+    const state = lastEventKind === 'no-ack' ? 'Sem confirmação' : devices.find(device => device.state === 'Online')?.state || devices.find(device => device.state === 'Standby')?.state || devices[0]?.state || 'Aguardando dados';
+    const maskedNumber = privacyMode ? displayNumber.replace(/\d/g, '•') : displayNumber;
+    const visibleLabel = privacyMode ? 'Contato privado' : label || 'Contato sem nome';
+    const stateClass = state === 'Online' ? 'status-online' : state === 'Standby' ? 'status-standby' : 'status-unknown';
 
-    // Blur phone number in privacy mode
-    const blurredNumber = privacyMode ? displayNumber.replace(/\d/g, '•') : displayNumber;
+    function saveLabel() {
+        onRename(draft.trim());
+        setEditing(false);
+    }
 
     return (
-        <div className="bg-gradient-to-br from-white to-gray-50 rounded-xl shadow-lg border border-gray-200 overflow-hidden">
-            {/* Header with Stop Button */}
-            <div className="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <span className={clsx(
-                        "px-2 py-1 rounded text-xs font-medium flex items-center gap-1",
-                        platform === 'whatsapp' ? "bg-green-100 text-green-700" : "bg-blue-100 text-blue-700"
-                    )}>
-                        <MessageCircle size={12} />
-                        {platform === 'whatsapp' ? 'WhatsApp' : 'Signal'}
-                    </span>
-                    <div>
-                        <h3 className="text-lg font-semibold text-gray-900">{blurredNumber}</h3>
-                        {expiresAt && <p className="text-xs text-gray-600">Stops automatically at {new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>}
+        <article className="contact-card">
+            <div className="contact-head">
+                <div className="contact-identity">
+                    <div className={`avatar ${platform === 'signal' ? 'avatar-signal' : ''}`}>{label ? label.slice(0, 1).toUpperCase() : <MessageCircle size={20} />}</div>
+                    <div className="contact-title">
+                        {editing ? <form className="rename-form" onSubmit={event => { event.preventDefault(); saveLabel(); }}><input autoFocus aria-label="Nome do contato" maxLength={60} value={draft} onChange={event => setDraft(event.target.value)} placeholder="Nome ou apelido" /><button type="submit" aria-label="Salvar nome"><Check size={15} /></button><button type="button" aria-label="Cancelar" onClick={() => setEditing(false)}><X size={15} /></button></form> : <div className="name-line"><h3>{visibleLabel}</h3><button type="button" className="rename-trigger" aria-label={`Renomear ${visibleLabel}`} title="Renomear contato" onClick={() => { setDraft(label || ''); setEditing(true); }}><Pencil size={14} /></button></div>}
+                        <p>{maskedNumber} <span>•</span> {platform === 'whatsapp' ? 'WhatsApp' : 'Signal'}</p>
                     </div>
                 </div>
-                <button
-                    onClick={onRemove}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 flex items-center gap-2 font-medium transition-colors text-sm"
-                >
-                    <Square size={16} /> Stop
-                </button>
+                <span className={`status-badge ${stateClass}`}><i />{state}</span>
             </div>
-
-            <div className="p-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Status Card */}
-                    <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 flex flex-col items-center text-center">
-                        <div className="relative mb-4">
-                            <div className="w-32 h-32 rounded-full overflow-hidden bg-gray-100 border-4 border-white shadow-md">
-                                {profilePic ? (
-                                    <img
-                                        src={profilePic}
-                                        alt="Profile"
-                                        className={clsx(
-                                            "w-full h-full object-cover transition-all duration-200",
-                                            privacyMode && "blur-xl scale-110"
-                                        )}
-                                        style={privacyMode ? {
-                                            filter: 'blur(16px) contrast(0.8)',
-                                        } : {}}
-                                    />
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-gray-400">
-                                        No Image
-                                    </div>
-                                )}
-                            </div>
-                            <div className={clsx(
-                                "absolute bottom-2 right-2 w-6 h-6 rounded-full border-2 border-white",
-                                currentStatus === 'Online' ? "bg-green-500" :
-                                    currentStatus === 'Standby' ? "bg-yellow-500" : "bg-gray-400"
-                            )} />
-                        </div>
-
-                        <h4 className="text-xl font-bold text-gray-900 mb-1">{blurredNumber}</h4>
-
-                        <p className="text-xs text-gray-500 mb-2">Estimated from message delay; may differ from actual phone activity.</p>
-
-                        <div className="flex items-center gap-2 mb-4">
-                            <span className={clsx(
-                                "px-3 py-1 rounded-full text-sm font-medium",
-                                currentStatus === 'Online' ? "bg-green-100 text-green-700" :
-                                    currentStatus === 'Standby' ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-700"
-                            )}>
-                                {currentStatus}
-                            </span>
-                        </div>
-
-                        <div className="w-full pt-4 border-t border-gray-100 space-y-2">
-                            <div className="flex justify-between items-center text-sm text-gray-600">
-                                <span className="flex items-center gap-1"><Wifi size={16} /> Official Status</span>
-                                <span className="font-medium">{presence || 'Unknown'}</span>
-                            </div>
-                            <div className="flex justify-between items-center text-sm text-gray-600">
-                                <span className="flex items-center gap-1"><Smartphone size={16} /> Devices</span>
-                                <span className="font-medium">{deviceCount || 0}</span>
-                            </div>
-                        </div>
-
-                        {/* Device List */}
-                        {devices.length > 0 && (
-                            <div className="w-full pt-4 border-t border-gray-100 mt-4">
-                                <h5 className="text-xs font-semibold text-gray-500 uppercase mb-2">Device States</h5>
-                                <div className="space-y-1">
-                                    {devices.map((device, idx) => (
-                                        <div key={device.jid} className="flex items-center justify-between text-sm py-1">
-                                            <div className="flex items-center gap-2">
-                                                <Monitor size={14} className="text-gray-400" />
-                                                <span className="text-gray-600">Device {idx + 1}</span>
-                                            </div>
-                                            <span className={clsx(
-                                                "px-2 py-0.5 rounded text-xs font-medium",
-                                                device.state === 'Online' ? "bg-green-100 text-green-700" :
-                                                    device.state === 'Standby' ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-700"
-                                            )}>
-                                                {device.state}
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Metrics & Chart */}
-                    <div className="md:col-span-2 space-y-6">
-                        {/* Metrics Grid */}
-                        <div className="grid grid-cols-3 gap-4">
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                                <div className="text-sm text-gray-500 mb-1 flex items-center gap-1"><Activity size={16} /> Latest confirmed Avg RTT</div>
-                                <div className="text-2xl font-bold text-gray-900">{lastData?.avg.toFixed(0) || '-'} ms</div>
-                            </div>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                                <div className="text-sm text-gray-500 mb-1">Median (50)</div>
-                                <div className="text-2xl font-bold text-gray-900">{lastData?.median.toFixed(0) || '-'} ms</div>
-                            </div>
-                            <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                                <div className="text-sm text-gray-500 mb-1">Threshold</div>
-                                <div className="text-2xl font-bold text-blue-600">{lastData?.threshold.toFixed(0) || '-'} ms</div>
-                            </div>
-                        </div>
-
-                        {/* Chart */}
-                        <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-200 h-[300px]">
-                            <h5 className="text-sm font-medium text-gray-500 mb-4">RTT History & Threshold</h5>
-                            <ResponsiveContainer width="100%" height="100%">
-                                <LineChart data={data}>
-                                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                                    <XAxis dataKey="timestamp" hide />
-                                    <YAxis domain={['auto', 'auto']} />
-                                    <Tooltip
-                                        labelFormatter={(t: number) => new Date(t).toLocaleTimeString()}
-                                        contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                    />
-                                    <Line type="monotone" dataKey="avg" stroke="#3b82f6" strokeWidth={2} dot={false} name="Avg RTT" isAnimationActive={false} />
-                                    <Line type="step" dataKey="threshold" stroke="#ef4444" strokeDasharray="5 5" dot={false} name="Threshold" isAnimationActive={false} />
-                                </LineChart>
-                            </ResponsiveContainer>
-                        </div>
-                    </div>
-                </div>
+            <div className="contact-meta"><span><Radio size={14} /> Sessão em tempo real</span>{expiresAt && <span><Clock3 size={14} /> Encerra às {new Date(expiresAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>}</div>
+            <div className="metrics-row">
+                <div><span>ÚLTIMO RTT</span><strong>{latest ? latest.rtt.toFixed(0) : '—'}<small>ms</small></strong></div>
+                <div><span>MÉDIA RECENTE</span><strong>{latest ? latest.avg.toFixed(0) : '—'}<small>ms</small></strong></div>
+                <div><span>DISPOSITIVOS</span><strong>{deviceCount.toString().padStart(2, '0')}</strong></div>
             </div>
-        </div>
+            <div className="chart-area"><div className="chart-heading"><span><Activity size={15} /> HISTÓRICO DE LATÊNCIA</span><span>{data.length} AMOSTRAS</span></div>
+                {data.length ? <ResponsiveContainer width="100%" height={160}><LineChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: -28 }}><CartesianGrid strokeDasharray="3 5" vertical={false} stroke="#193029" /><XAxis dataKey="timestamp" hide /><YAxis tick={{ fill: '#687e75', fontSize: 11 }} axisLine={false} tickLine={false} domain={['auto', 'auto']} /><Tooltip labelFormatter={value => new Date(Number(value)).toLocaleTimeString('pt-BR')} contentStyle={{ background: '#0d1b16', border: '1px solid #28503c', borderRadius: 10, color: '#e6f5eb' }} /><Line type="monotone" dataKey="avg" stroke="#a8ff5b" strokeWidth={2.5} dot={false} name="RTT médio" isAnimationActive={false} /><Line type="step" dataKey="threshold" stroke="#3e6850" strokeDasharray="4 4" dot={false} name="Limite" isAnimationActive={false} /></LineChart></ResponsiveContainer> : <div className="chart-placeholder">Aguardando primeiras medições...</div>}
+            </div>
+            <div className="contact-footer"><span>Estimativa baseada no tempo de resposta; pode divergir da atividade real.</span><button type="button" onClick={onRemove}><Square size={13} /> Encerrar</button></div>
+        </article>
     );
 }
