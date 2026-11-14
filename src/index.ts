@@ -67,11 +67,6 @@ import { WhatsAppTracker } from './tracker.js';
 import { normalizeConsentedNumber } from './security.js';
 import * as readline from 'readline';
 
-const consentedNumbers = new Set((process.env.CONSENTED_NUMBERS || '')
-    .split(',').map(normalizeConsentedNumber).filter((number): number is string => number !== null));
-if (consentedNumbers.size === 0) {
-    throw new Error('Set CONSENTED_NUMBERS before starting the CLI');
-}
 if (!process.argv.includes('--acknowledge-notifications')) {
     throw new Error('Probes can trigger phone notifications. Pass --acknowledge-notifications after obtaining the recipient\'s consent.');
 }
@@ -159,13 +154,6 @@ async function connectToWhatsApp() {
                 askForTarget();
                 return;
             }
-            if (!consentedNumbers.has(cleanNumber)) {
-                originalConsoleLog('This number is not in CONSENTED_NUMBERS.');
-                rl.close();
-                askForTarget();
-                return;
-            }
-
             const targetJid = cleanNumber + '@s.whatsapp.net';
 
             if (debugMode) {

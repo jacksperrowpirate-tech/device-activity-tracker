@@ -33,8 +33,6 @@ if (MONITOR_TOKEN && MONITOR_TOKEN.length < 24) throw new Error('Monitor token i
 const secureCookies = process.env.PUBLIC_HTTPS === 'true';
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'http://localhost:3000')
     .split(',').map(origin => origin.trim()).filter(Boolean);
-const consentedNumbers = new Set((process.env.CONSENTED_NUMBERS || '')
-    .split(',').map(normalizeConsentedNumber).filter((number): number is string => number !== null));
 
 const app = express();
 app.use(cors({ origin: allowedOrigins, credentials: true }));
@@ -245,7 +243,6 @@ async function rehydratePlatform(platform: Platform) {
             continue;
         }
         const number = contact.consentedNumber;
-        if (!consentedNumbers.has(number)) continue;
         try {
             if (platform === 'whatsapp' && isWhatsAppConnected) {
                 const tracker = new WhatsAppTracker(sock, contact.id);
@@ -534,8 +531,8 @@ io.on('connection', (socket) => {
             socket.emit('error', { message: 'Enter a valid international number, name and platform.' });
             return;
         }
-        if (data?.consent !== true || !consentedNumbers.has(cleanNumber)) {
-            socket.emit('error', { message: 'This number requires recorded consent and inclusion in CONSENTED_NUMBERS.' });
+        if (data?.consent !== true) {
+            socket.emit('error', { message: 'Confirm that this contact authorized the session before tracking.' });
             return;
         }
         if (data.notificationsAcknowledged !== true) {
