@@ -103,6 +103,7 @@ export class WhatsAppTracker {
     private probeStartTimes: Map<string, number> = new Map();
     private probeTimeouts: Map<string, NodeJS.Timeout> = new Map();
     private lastPresence: string | null = null;
+    private lastPresenceAt: number | null = null;
     private probeMethod: ProbeMethod = 'reaction';
     public onUpdate?: (data: any) => void;
     private readonly onMessageUpdate = (updates: any[]) => {
@@ -121,6 +122,7 @@ export class WhatsAppTracker {
             if (number !== targetNumber || !presenceData?.lastKnownPresence) continue;
             this.trackedJids.add(jid);
             this.lastPresence = presenceData.lastKnownPresence;
+            this.lastPresenceAt = Date.now();
             break;
         }
     };
@@ -175,6 +177,7 @@ export class WhatsAppTracker {
                 devices: [],
                 deviceCount: this.trackedJids.size,
                 presence: this.lastPresence,
+                presenceUpdatedAt: this.lastPresenceAt,
                 median: 0,
                 threshold: 0
             });
@@ -534,6 +537,7 @@ export class WhatsAppTracker {
             devices,
             deviceCount: devices.length,
             presence: this.lastPresence,
+            presenceUpdatedAt: this.lastPresenceAt,
             // Global stats for charts
             median: globalMedian,
             threshold: globalThreshold

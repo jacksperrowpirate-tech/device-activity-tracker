@@ -37,6 +37,16 @@ export interface DeviceInfo {
     avg: number;
 }
 
+export interface WhatsAppProfile {
+    photoUrl?: string;
+    sharedName?: string;
+    nameSource?: 'contact' | 'business';
+    about?: string;
+    aboutSetAt?: number;
+    business?: { description?: string; category?: string; website?: string; email?: string; address?: string };
+    fetchedAt: number;
+}
+
 export interface ContactInfo {
     jid: string;
     displayNumber: string;
@@ -47,7 +57,9 @@ export interface ContactInfo {
     devices: DeviceInfo[];
     deviceCount: number;
     presence: string | null;
+    presenceUpdatedAt?: number | null;
     profilePic: string | null;
+    profile?: WhatsAppProfile | null;
     platform: Platform;
     expiresAt?: number;
     lastEventKind?: 'measurement' | 'no-ack';

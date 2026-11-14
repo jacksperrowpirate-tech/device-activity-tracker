@@ -17,3 +17,21 @@ test('renames a contact and masks the name in privacy mode', () => {
     expect(screen.getByRole('heading', { name: 'Contato privado' })).toBeInTheDocument();
     expect(screen.queryByText('491701234567')).not.toBeInTheDocument();
 });
+
+test('shows cached profile details and masks them in privacy mode', () => {
+    const onRefreshProfile = vi.fn();
+    const props = {
+        jid: 'test@s.whatsapp.net', displayNumber: '491701234567', data: [], recentProbes: [], devices: [],
+        deviceCount: 0, presence: null, profilePic: null, onRemove: vi.fn(), onRename: vi.fn(), onRefreshProfile,
+        profile: { sharedName: 'Ana', nameSource: 'contact' as const, about: 'Em reunião', fetchedAt: Date.now() }
+    };
+    const view = render(<ContactCard {...props} />);
+    fireEvent.click(screen.getByText(/Perfil do WhatsApp/i));
+    expect(screen.getByText('Ana')).toBeInTheDocument();
+    expect(screen.getByText('Em reunião')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /atualizar perfil/i }));
+    expect(onRefreshProfile).toHaveBeenCalledOnce();
+    view.rerender(<ContactCard {...props} privacyMode />);
+    expect(screen.queryByText('Ana')).not.toBeInTheDocument();
+    expect(screen.queryByText('Em reunião')).not.toBeInTheDocument();
+});

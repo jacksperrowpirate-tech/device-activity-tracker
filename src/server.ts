@@ -21,6 +21,8 @@ import { createContactRepository, type TrackedContact } from './infra/contact-re
 import { AdminSessions, clearedSessionCookie, sessionCookie, verifyPassword } from './auth.js';
 import { ActivityHistoryRecorder, createActivityHistoryStore, historySubjectKey, type HistorySubject } from './infra/activity-history.js';
 import { createTelemetryStore, type TelemetrySample } from './infra/telemetry-store.js';
+import { createProfileStore } from './infra/profile-store.js';
+import { contactSharedName, fetchWhatsAppProfile } from './whatsapp-profile.js';
 import { randomUUID } from 'node:crypto';
 
 process.umask(0o077);
@@ -132,7 +134,36 @@ const pendingContacts = new Set<string>();
 const repository = await createContactRepository();
 const historyStore = await createActivityHistoryStore();
 const telemetryStore = await createTelemetryStore();
+const profileStore = await createProfileStore();
 const activityRecorders = new Map<string, ActivityHistoryRecorder>();
+const profileRefreshes = new Set<string>();
+const profileRefreshAt = new Map<string, number>();
+const profileTasks = new Map<string, Promise<void>>();
+
+function queueProfileTask(id: string, operation: () => Promise<void>): Promise<void> {
+    const task = (profileTasks.get(id) || Promise.resolve()).catch(() => undefined).then(operation);
+    profileTasks.set(id, task);
+    void task.finally(() => { if (profileTasks.get(id) === task) profileTasks.delete(id); }).catch(() => undefined);
+    return task;
+}
+
+async function refreshWhatsAppProfile(id: string, force = false): Promise<void> {
+    if (!isWhatsAppConnected || !trackers.has(id) || profileRefreshes.has(id)) return;
+    profileRefreshes.add(id);
+    await queueProfileTask(id, async () => {
+        try {
+            const previous = await profileStore.get(id);
+            if (!trackers.has(id) || !isWhatsAppConnected) return;
+            if (!force && previous && Date.now() - previous.fetchedAt < 12 * 60 * 60_000) return;
+            profileRefreshAt.set(id, Date.now());
+            const profile = await fetchWhatsAppProfile(sock, id, previous);
+            if (!trackers.has(id)) return;
+            await profileStore.save(id, profile);
+            io.emit('contact-profile', { jid: id, profile });
+        } catch (error) { console.error('Could not refresh WhatsApp profile', error); }
+        finally { profileRefreshes.delete(id); }
+    });
+}
 
 app.get('/api/history/export', async (request, response) => {
     try {
@@ -180,6 +211,9 @@ async function removeTrackedContact(id: string) {
     if (recorder) { await recorder.stop(); activityRecorders.delete(id); }
     await repository.remove(id);
     await telemetryStore.clear(id);
+    await profileTasks.get(id)?.catch(() => undefined);
+    await profileStore.remove(id);
+    profileRefreshAt.delete(id);
     io.emit('contact-removed', id);
 }
 
@@ -275,6 +309,7 @@ async function rehydratePlatform(platform: Platform) {
             if (trackers.has(contact.id)) {
                 scheduleExpiry(contact);
                 io.emit('contact-added', { jid: contact.id, number, label: contact.label, platform, expiresAt: contact.expiresAt });
+                if (platform === 'whatsapp') void refreshWhatsAppProfile(contact.id);
             }
         } catch (error) {
             trackers.get(contact.id)?.tracker.stopTracking();
@@ -294,6 +329,26 @@ async function connectToWhatsApp() {
         markOnlineOnConnect: true,
         printQRInTerminal: false,
     });
+
+    const currentSocket = sock;
+    const onContacts = (contacts: any[]) => {
+        if (sock !== currentSocket || !Array.isArray(contacts)) return;
+        for (const contact of contacts) {
+            const id = [contact?.id, contact?.phoneNumber].find(value => typeof value === 'string' && trackers.has(value));
+            if (!id) continue;
+            const name = contactSharedName(contact);
+            if (!name) continue;
+            void queueProfileTask(id, async () => {
+                const previous = await profileStore.get(id);
+                if (!trackers.has(id)) return;
+                const profile = { ...previous, ...name, fetchedAt: previous?.fetchedAt ?? 0 };
+                await profileStore.save(id, profile);
+                io.emit('contact-profile', { jid: id, profile });
+            }).catch(error => console.error('Could not save shared contact name', error));
+        }
+    };
+    sock.ev.on('contacts.upsert', onContacts);
+    sock.ev.on('contacts.update', onContacts);
 
     sock.ev.on('connection.update', async (update: any) => {
         const { connection, lastDisconnect, qr } = update;
@@ -499,7 +554,8 @@ io.on('connection', (socket) => {
         try {
             const contacts = (await repository.list()).filter(contact => trackers.has(contact.id));
             socket.emit('tracked-contacts', await Promise.all(contacts.map(async contact => ({
-                ...contact, recentProbes: await telemetryStore.recent(contact.id)
+                ...contact, recentProbes: await telemetryStore.recent(contact.id),
+                profile: contact.platform === 'whatsapp' ? await profileStore.get(contact.id) : null
             }))));
         } catch (error) {
             console.error('Failed to list saved contacts', error);
@@ -673,18 +729,6 @@ io.on('connection', (socket) => {
                         await repository.save(contact);
                         scheduleExpiry(contact);
 
-                        const ppUrl = await tracker.getProfilePicture();
-
-                        let contactName = cleanNumber;
-                        try {
-                            const contactInfo = await sock.onWhatsApp(result.jid);
-                            if (contactInfo && contactInfo[0]?.notify) {
-                                contactName = contactInfo[0].notify;
-                            }
-                        } catch (err) {
-                            console.log('[NAME] Could not fetch contact name, using number');
-                        }
-
                         io.emit('contact-added', {
                             jid: result.jid,
                             number: cleanNumber,
@@ -693,8 +737,7 @@ io.on('connection', (socket) => {
                             expiresAt
                         });
 
-                        io.emit('profile-pic', { jid: result.jid, url: ppUrl });
-                        io.emit('contact-name', { jid: result.jid, name: contactName });
+                        void refreshWhatsAppProfile(result.jid, true);
                     } else {
                         socket.emit('error', { jid: targetJid, message: 'Number not on WhatsApp' });
                     }
@@ -722,6 +765,15 @@ io.on('connection', (socket) => {
             console.error('Failed to remove saved contact', error);
             socket.emit('error', { message: 'Could not remove saved contact.' });
         }
+    });
+
+    socket.on('refresh-contact-profile', async (jid: unknown) => {
+        if (typeof jid !== 'string' || !isWhatsAppConnected || trackers.get(jid)?.platform !== 'whatsapp') return;
+        if (Date.now() - (profileRefreshAt.get(jid) || 0) < 60_000) {
+            socket.emit('error', { message: 'Aguarde um minuto antes de atualizar este perfil.' });
+            return;
+        }
+        await refreshWhatsAppProfile(jid, true);
     });
 
     socket.on('set-contact-label', async (data: { jid?: unknown; label?: unknown } | null) => {

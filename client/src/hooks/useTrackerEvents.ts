@@ -8,6 +8,7 @@ interface TrackerUpdate {
     eventKind?: 'measurement' | 'no-ack';
     measuredJid?: string;
     presence?: string | null;
+    presenceUpdatedAt?: number | null;
     deviceCount?: number;
     devices?: DeviceInfo[];
     median?: number;
@@ -29,6 +30,7 @@ export function useTrackerEvents(
                 const next = new Map(previous);
                 const updated = { ...contact };
                 if (data.presence !== undefined) updated.presence = data.presence;
+                if (data.presenceUpdatedAt !== undefined) updated.presenceUpdatedAt = data.presenceUpdatedAt;
                 if (data.deviceCount !== undefined) updated.deviceCount = data.deviceCount;
                 if (data.devices !== undefined) updated.devices = data.devices;
                 if (data.eventKind !== undefined) updated.lastEventKind = data.eventKind;
