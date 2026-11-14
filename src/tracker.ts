@@ -39,7 +39,7 @@ class TrackerLogger {
     }
 
     formatDeviceState(jid: string, rtt: number, avgRtt: number, median: number, threshold: number, state: string) {
-        const stateColor = state === 'Online' ? '🟢' : state === 'Standby' ? '🟡' : '⚪';
+        const stateColor = state === 'Low RTT' ? '🔵' : state === 'High RTT' ? '🟡' : '⚪';
         const timestamp = new Date().toLocaleTimeString('de-DE');
 
         // Box width is 64 characters, inner content is 62 characters (excluding ║ on both sides)
@@ -74,7 +74,7 @@ const trackerLogger = new TrackerLogger();
 interface DeviceMetrics {
     rttHistory: number[];      // Historical RTT measurements (up to 2000)
     recentRtts: number[];      // Recent RTTs for moving average (last 3)
-    state: string;             // Current estimate (Online/Standby/Calibrating/No ACK)
+    state: string;             // RTT category (Low RTT/High RTT/Calibrating/No ACK)
     lastRtt: number;           // Most recent RTT measurement
     lastUpdate: number;        // Timestamp of last update
 }
@@ -392,8 +392,7 @@ export class WhatsAppTracker {
      * @param timeout Time elapsed before timeout
      */
     private markProbeUnconfirmed(jid: string, timeout: number) {
-        // Initialize device metrics if not exists
-        if (!this.deviceMetrics.has(jid)) {
+        if (this.deviceMetrics.size === 0) {
             this.deviceMetrics.set(jid, {
                 rttHistory: [],
                 recentRtts: [],
@@ -402,10 +401,13 @@ export class WhatsAppTracker {
                 lastUpdate: Date.now()
             });
         } else {
-            const metrics = this.deviceMetrics.get(jid)!;
-            metrics.state = 'No ACK';
-            metrics.lastRtt = 0;
-            metrics.lastUpdate = Date.now();
+            // A timeout has no device identifier. Keep the existing device list
+            // instead of adding a second entry for a phone-number alias.
+            for (const metrics of this.deviceMetrics.values()) {
+                metrics.state = 'No ACK';
+                metrics.lastRtt = 0;
+                metrics.lastUpdate = Date.now();
+            }
         }
 
         trackerLogger.info(`\n⚪ No ACK for ${jid} after ${timeout}ms; device state is unconfirmed\n`);
@@ -418,7 +420,10 @@ export class WhatsAppTracker {
      * @param rtt Round-trip time in milliseconds
      */
     private addMeasurementForDevice(jid: string, rtt: number) {
-        // Initialize device metrics if not exists
+        const placeholder = this.deviceMetrics.get(this.targetJid);
+        if (jid !== this.targetJid && placeholder?.state === 'No ACK' && placeholder.rttHistory.length === 0) {
+            this.deviceMetrics.delete(this.targetJid);
+        }
         if (!this.deviceMetrics.has(jid)) {
             this.deviceMetrics.set(jid, {
                 rttHistory: [],
@@ -454,8 +459,8 @@ export class WhatsAppTracker {
             metrics.lastRtt = rtt;
             metrics.lastUpdate = Date.now();
 
-            // Determine new state based on RTT
-            this.determineDeviceState(jid);
+            // Categorize RTT against the recent baseline; this is not a screen-state measurement.
+            this.categorizeRtt(jid);
         }
         else {
             metrics.state = 'Delayed ACK';
@@ -467,10 +472,10 @@ export class WhatsAppTracker {
     }
 
     /**
-     * Determine a tentative device state from confirmed RTT measurements.
+     * Categorize confirmed RTT against the running baseline.
      * @param jid Device JID
      */
-    private determineDeviceState(jid: string) {
+    private categorizeRtt(jid: string) {
         const metrics = this.deviceMetrics.get(jid);
         if (!metrics) return;
 
@@ -490,9 +495,9 @@ export class WhatsAppTracker {
             threshold = median * 0.9;
 
             if (movingAvg < threshold) {
-                metrics.state = 'Online';
+                metrics.state = 'Low RTT';
             } else {
-                metrics.state = 'Standby';
+                metrics.state = 'High RTT';
             }
         } else {
             metrics.state = 'Calibrating...';
@@ -527,7 +532,7 @@ export class WhatsAppTracker {
             eventKind,
             measuredJid,
             devices,
-            deviceCount: this.trackedJids.size,
+            deviceCount: devices.length,
             presence: this.lastPresence,
             // Global stats for charts
             median: globalMedian,

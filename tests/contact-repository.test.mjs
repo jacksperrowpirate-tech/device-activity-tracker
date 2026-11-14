@@ -13,12 +13,12 @@ test('file repository persists concurrent changes and removes contacts', async (
         const expiresAt = Date.now() + 60_000;
         assert.deepEqual(await repository.list(), []);
         await Promise.all([
-            repository.save({ id: '491701234567@s.whatsapp.net', platform: 'whatsapp', notificationsAcknowledged: true, expiresAt, probeMethod: 'reaction' }),
-            repository.save({ id: 'signal:491701234568', platform: 'signal', notificationsAcknowledged: true })
+            repository.save({ id: '491701234567@s.whatsapp.net', platform: 'whatsapp', consentedNumber: '491701234567', notificationsAcknowledged: true, expiresAt, probeMethod: 'reaction' }),
+            repository.save({ id: 'signal:491701234568', platform: 'signal', consentedNumber: '491701234568', notificationsAcknowledged: true })
         ]);
         assert.equal((await repository.list()).length, 2);
         await repository.remove('signal:491701234568');
-        assert.deepEqual(await repository.list(), [{ id: '491701234567@s.whatsapp.net', platform: 'whatsapp', notificationsAcknowledged: true, expiresAt, probeMethod: 'reaction' }]);
+        assert.deepEqual(await repository.list(), [{ id: '491701234567@s.whatsapp.net', platform: 'whatsapp', consentedNumber: '491701234567', notificationsAcknowledged: true, expiresAt, probeMethod: 'reaction' }]);
         assert.equal(JSON.parse(await readFile(filename, 'utf8')).length, 1);
         await repository.close();
     } finally {
@@ -26,11 +26,14 @@ test('file repository persists concurrent changes and removes contacts', async (
     }
 });
 
-test('file repository does not restore contacts saved before notification acknowledgement', async () => {
+test('file repository does not restore contacts lacking consent metadata', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'tracker-contacts-'));
     const filename = path.join(directory, 'contacts.json');
     try {
-        await writeFile(filename, JSON.stringify([{ id: '491701234567@s.whatsapp.net', platform: 'whatsapp' }]));
+        await writeFile(filename, JSON.stringify([
+            { id: '491701234567@s.whatsapp.net', platform: 'whatsapp' },
+            { id: '491701234568@s.whatsapp.net', platform: 'whatsapp', notificationsAcknowledged: true }
+        ]));
         const repository = new FileContactRepository(filename);
         assert.deepEqual(await repository.list(), []);
         await repository.close();

@@ -37,4 +37,5 @@ export interface ContactInfo {
     profilePic: string | null;
     platform: Platform;
     expiresAt?: number;
+    lastEventKind?: 'measurement' | 'no-ack';
 }

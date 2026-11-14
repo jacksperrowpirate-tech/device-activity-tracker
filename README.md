@@ -14,11 +14,7 @@
 
 This project implements the research from the paper **"Careless Whisper: Exploiting Silent Delivery Receipts to Monitor Users on Mobile Instant Messengers"** by Gabriel K. Gegenhuber, Maximilian Günther, Markus Maier, Aljosha Judmayer, Florian Holzbauer, Philipp É. Frenzel, and Johanna Ullrich (University of Vienna & SBA Research).
 
-**What it does:** By measuring Round-Trip Time (RTT) of WhatsApp message delivery receipts, this tool can detect:
-- When a user is actively using their device (low RTT)
-- When the device is in standby/idle mode (higher RTT)
-- Potential location changes (mobile data vs. WiFi)
-- Activity patterns over time
+**What it does:** Measures Round-Trip Time (RTT) of WhatsApp and Signal delivery confirmations and plots relative latency changes over time. The research explores whether such changes can reveal activity or network conditions; this implementation does not validate those inferences without ground-truth calibration.
 
 **Security implications:** This demonstrates a significant privacy vulnerability in messaging apps that can be exploited for surveillance.
 
@@ -26,7 +22,7 @@ This project implements the research from the paper **"Careless Whisper: Exploit
 
 ![WhatsApp Activity Tracker Interface](example.png)
 
-The web interface shows real-time RTT measurements, device state detection, and activity patterns.
+The web interface shows real-time RTT measurements and relative latency categories. A single uncalibrated RTT series cannot establish whether a phone screen is active.
 
 ## Installation
 
@@ -133,7 +129,7 @@ Follow prompts to authenticate and enter a consenting target number. The flag co
 ║ 🟡 Device Status Update - 09:41:51                             ║
 ╠════════════════════════════════════════════════════════════════╣
 ║ JID:        ***********@lid                                    ║
-║ Status:     Standby                                            ║
+║ Status:     High RTT                                           ║
 ║ RTT:        1104ms                                             ║
 ║ Avg (3):    1161ms                                             ║
 ║ Median:     1195ms                                             ║
@@ -141,13 +137,13 @@ Follow prompts to authenticate and enter a consenting target number. The flag co
 ╚════════════════════════════════════════════════════════════════╝
 ```
 
-- **🟢 Online**: Device is actively being used (RTT below threshold)
-- **🟡 Standby**: Device is idle/locked (RTT above threshold)
+- **🔵 Low RTT**: RTT below the current relative threshold; screen activity is unconfirmed.
+- **🟡 High RTT**: RTT at or above the threshold; screen activity is unconfirmed.
 - **⚪ No ACK**: No delivery confirmation arrived within 10 seconds; this does not prove that the device is offline.
 
 ## How It Works
 
-The tracker sends probe messages and measures the Round-Trip Time (RTT) to detect device activity. Two probe methods are available:
+The tracker sends probe messages and measures the Round-Trip Time (RTT) of delivery confirmations. Two probe methods are available:
 
 ### Probe Methods
 
@@ -158,7 +154,7 @@ The tracker sends probe messages and measures the Round-Trip Time (RTT) to detec
 
 ### Detection Logic
 
-The time between sending the probe message and receiving the CLIENT ACK (Status 3) is measured as RTT. Device state is detected using a dynamic threshold calculated as 90% of the median RTT: values below the threshold indicate active usage, values above indicate standby mode. Measurements are stored in a history and the median is continuously updated to adapt to different network conditions.
+The time between sending the probe and receiving a CLIENT ACK (status 3) is measured as RTT. The app labels values relative to 90% of the running median as **Low RTT** or **High RTT**. These labels describe latency only. Our live test classified an open WhatsApp session as “Standby,” so screen-state inference requires separate calibration with known open and closed periods. A missing ACK is shown as **No ACK**, not as proof that the device is offline.
 
 ### Switching Probe Methods
 

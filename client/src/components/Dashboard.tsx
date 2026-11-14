@@ -97,18 +97,18 @@ export function Dashboard({ connectionState }: DashboardProps) {
             setProbeMethod(method);
         }
 
-        function onTrackedContacts(contacts: { id: string, platform: Platform, expiresAt?: number }[]) {
+        function onTrackedContacts(contacts: { id: string, platform: Platform, consentedNumber?: string, expiresAt?: number }[]) {
             setContacts(prev => {
                 const next = new Map<string, ContactInfo>();
-                contacts.forEach(({ id, platform, expiresAt }) => {
+                contacts.forEach(({ id, platform, consentedNumber, expiresAt }) => {
                     if (prev.has(id)) {
                         next.set(id, { ...prev.get(id)!, expiresAt });
                     } else {
                         // Extract display number from id
-                        let displayNumber = id;
+                        let displayNumber = consentedNumber || id;
                         if (platform === 'signal') {
-                            displayNumber = id.replace('signal:', '');
-                        } else {
+                            displayNumber = consentedNumber || id.replace('signal:', '');
+                        } else if (!consentedNumber) {
                             // WhatsApp JID format: number@s.whatsapp.net
                             displayNumber = id.split('@')[0];
                         }
@@ -338,6 +338,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
                                 privacyMode={privacyMode}
                                 platform={contact.platform}
                                 expiresAt={contact.expiresAt}
+                                lastEventKind={contact.lastEventKind}
                             />
                         ))}
                     </div>

@@ -29,6 +29,7 @@ export function useTrackerEvents(
                 if (data.presence !== undefined) updated.presence = data.presence;
                 if (data.deviceCount !== undefined) updated.deviceCount = data.deviceCount;
                 if (data.devices !== undefined) updated.devices = data.devices;
+                if (data.eventKind !== undefined) updated.lastEventKind = data.eventKind;
                 const device = data.devices?.find(item => item.jid === data.measuredJid && item.rtt > 0)
                     ?? data.devices?.find(item => item.rtt > 0);
                 if (device && data.eventKind !== 'no-ack' && data.median !== undefined) {

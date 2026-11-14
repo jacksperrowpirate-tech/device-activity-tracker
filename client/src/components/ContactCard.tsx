@@ -33,6 +33,7 @@ interface ContactCardProps {
     privacyMode?: boolean;
     platform?: Platform;
     expiresAt?: number;
+    lastEventKind?: 'measurement' | 'no-ack';
 }
 
 export function ContactCard({
@@ -46,12 +47,13 @@ export function ContactCard({
     onRemove,
     privacyMode = false,
     platform = 'whatsapp',
-    expiresAt
+    expiresAt,
+    lastEventKind
 }: ContactCardProps) {
     const lastData = data[data.length - 1];
-    const currentStatus = devices.length > 0
-        ? (devices.find(d => d.state.includes('Online'))?.state ||
-            devices.find(d => d.state === 'Standby')?.state ||
+    const currentStatus = lastEventKind === 'no-ack' ? 'No ACK' : devices.length > 0
+        ? (devices.find(d => d.state === 'Low RTT')?.state ||
+            devices.find(d => d.state === 'High RTT')?.state ||
             devices.find(d => d.state === 'Calibrating...')?.state ||
             devices.find(d => d.state === 'Delayed ACK')?.state ||
             devices[0].state)
@@ -111,21 +113,20 @@ export function ContactCard({
                             </div>
                             <div className={clsx(
                                 "absolute bottom-2 right-2 w-6 h-6 rounded-full border-2 border-white",
-                                currentStatus === 'No ACK' ? "bg-gray-400" :
-                                    currentStatus.includes('Online') ? "bg-green-500" : "bg-gray-400"
+                                currentStatus === 'Low RTT' ? "bg-blue-500" :
+                                    currentStatus === 'High RTT' ? "bg-yellow-500" : "bg-gray-400"
                             )} />
                         </div>
 
                         <h4 className="text-xl font-bold text-gray-900 mb-1">{blurredNumber}</h4>
 
-                        <p className="text-xs text-gray-500 mb-2">RTT estimate; network delays can affect this status.</p>
+                        <p className="text-xs text-gray-500 mb-2">Relative RTT only; this does not establish whether the screen is active.</p>
 
                         <div className="flex items-center gap-2 mb-4">
                             <span className={clsx(
                                 "px-3 py-1 rounded-full text-sm font-medium",
-                                currentStatus === 'No ACK' ? "bg-gray-100 text-gray-700" :
-                                    currentStatus.includes('Online') ? "bg-green-100 text-green-700" :
-                                        currentStatus === 'Standby' ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-700"
+                                currentStatus === 'Low RTT' ? "bg-blue-100 text-blue-700" :
+                                    currentStatus === 'High RTT' ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-700"
                             )}>
                                 {currentStatus}
                             </span>
@@ -155,9 +156,8 @@ export function ContactCard({
                                             </div>
                                             <span className={clsx(
                                                 "px-2 py-0.5 rounded text-xs font-medium",
-                                                device.state === 'No ACK' ? "bg-gray-100 text-gray-700" :
-                                                    device.state.includes('Online') ? "bg-green-100 text-green-700" :
-                                                        device.state === 'Standby' ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-700"
+                                                device.state === 'Low RTT' ? "bg-blue-100 text-blue-700" :
+                                                    device.state === 'High RTT' ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-700"
                                             )}>
                                                 {device.state}
                                             </span>

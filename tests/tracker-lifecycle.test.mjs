@@ -67,6 +67,18 @@ test('an ACK arriving during sendMessage is measured and a timeout is not report
     assert.equal(unconfirmed?.rtt, 0);
 });
 
+test('RTT categories do not claim screen state and replace a placeholder JID', () => {
+    const socket = { ev: new EventEmitter(), ws: new EventEmitter() };
+    const tracker = new WhatsAppTracker(socket, '491701234567@s.whatsapp.net');
+    const updates = [];
+    tracker.onUpdate = update => updates.push(update);
+    tracker.markProbeUnconfirmed('491701234567@s.whatsapp.net', 10000);
+    for (let i = 0; i < 3; i++) tracker.addMeasurementForDevice('device-identifier@lid', 1000);
+    const latest = updates.at(-1);
+    assert.equal(latest.devices.length, 1);
+    assert.equal(latest.devices[0].state, 'High RTT');
+});
+
 test('a failed Signal send does not classify the target as offline', async () => {
     const previousFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response('failed', { status: 500 });

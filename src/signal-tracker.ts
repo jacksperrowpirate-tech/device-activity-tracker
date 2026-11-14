@@ -346,13 +346,13 @@ export class SignalTracker {
                 rttHistory: [],
                 recentRtts: [],
                 state: 'No receipt',
-                lastRtt: timeout,
+                lastRtt: 0,
                 lastUpdate: Date.now()
             });
         } else {
             const metrics = this.deviceMetrics.get(identifier)!;
             metrics.state = 'No receipt';
-            metrics.lastRtt = timeout;
+            metrics.lastRtt = 0;
             metrics.lastUpdate = Date.now();
         }
 
@@ -392,19 +392,19 @@ export class SignalTracker {
             metrics.lastRtt = rtt;
             metrics.lastUpdate = Date.now();
 
-            this.determineDeviceState(identifier);
+            this.categorizeRtt(identifier);
         }
 
         this.sendUpdate();
     }
 
-    private determineDeviceState(identifier: string) {
+    private categorizeRtt(identifier: string) {
         const metrics = this.deviceMetrics.get(identifier);
         if (!metrics) return;
 
         if (metrics.state === 'No receipt') {
             if (metrics.lastRtt <= 5000 && metrics.recentRtts.length > 0) {
-                logger.debug(`Device ${identifier} came back online (RTT: ${metrics.lastRtt}ms)`);
+                logger.debug(`Receipt resumed for ${identifier} (RTT: ${metrics.lastRtt}ms)`);
             } else {
                 return;
             }
@@ -422,15 +422,15 @@ export class SignalTracker {
             threshold = median * 0.9;
 
             if (movingAvg < threshold) {
-                metrics.state = 'Online';
+                metrics.state = 'Low RTT';
             } else {
-                metrics.state = 'Standby';
+                metrics.state = 'High RTT';
             }
         } else {
             metrics.state = 'Calibrating...';
         }
 
-        const stateColor = metrics.state === 'Online' ? '🟢' : metrics.state === 'Standby' ? '🟡' : '⚪';
+        const stateColor = metrics.state === 'Low RTT' ? '🔵' : metrics.state === 'High RTT' ? '🟡' : '⚪';
         logger.info(`${stateColor} ${identifier}: ${metrics.state} (RTT: ${metrics.lastRtt}ms, Avg: ${movingAvg.toFixed(0)}ms)`);
     }
 

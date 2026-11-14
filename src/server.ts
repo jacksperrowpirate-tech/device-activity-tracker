@@ -126,9 +126,7 @@ async function rehydratePlatform(platform: Platform) {
             await removeTrackedContact(contact.id);
             continue;
         }
-        const number = contact.id.startsWith('signal:')
-            ? contact.id.slice('signal:'.length)
-            : contact.id.split('@')[0];
+        const number = contact.consentedNumber;
         if (!consentedNumbers.has(number)) continue;
         try {
             if (platform === 'whatsapp' && isWhatsAppConnected) {
@@ -452,7 +450,7 @@ io.on('connection', (socket) => {
                     };
 
                     await tracker.startTracking();
-                    const contact: TrackedContact = { id: signalId, platform: 'signal', notificationsAcknowledged: true, expiresAt };
+                    const contact: TrackedContact = { id: signalId, platform: 'signal', consentedNumber: cleanNumber, notificationsAcknowledged: true, expiresAt };
                     await repository.save(contact);
                     scheduleExpiry(contact);
 
@@ -507,6 +505,7 @@ io.on('connection', (socket) => {
                         const contact: TrackedContact = {
                             id: result.jid,
                             platform: 'whatsapp',
+                            consentedNumber: cleanNumber,
                             notificationsAcknowledged: true,
                             expiresAt,
                             probeMethod: globalProbeMethod
