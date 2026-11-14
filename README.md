@@ -96,6 +96,10 @@ Tracked contacts are saved in Redis by default or in `data/contacts.json` with `
 
 **Measurement limits:** Activity labels are estimates from RTT and can be affected by network latency, dropped receipts, or platform changes. Signal reactions return no probe identifier, so a delivery receipt from the same contact during an outstanding probe may be unrelated. Treat these measurements as exploratory data, not proof of a person's activity.
 
+**Session duration:** The dashboard offers 1, 15, or 60 minutes and **Sem prazo**. A session without a time limit requires a separate acknowledgement that the person consented to ongoing monitoring; it continues after page closure and backend restarts until manually stopped. Existing timed sessions keep their original expiry.
+
+**Activity history:** The report saves intervals that the RTT heuristic classified as “Online” after three consecutive confirmations and closes them after three consecutive “Standby” or missing-ACK events. It shows start, end, duration, sample count, and mean RTT, and exports CSV. These are **estimated periods**, not confirmed app presence: in a live test an open WhatsApp session was labeled “Standby.” History persists after tracking stops in Redis (or `data/activity-history.json` with `CONTACT_STORE=file`) until explicitly deleted from the report. Only new measurements after this feature is enabled are recorded automatically.
+
 ### Environment Variables
 
 | Variable | Default | Description |

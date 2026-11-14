@@ -16,9 +16,10 @@ import { pino } from 'pino';
 import { Boom } from '@hapi/boom';
 import { WhatsAppTracker, ProbeMethod } from './tracker.js';
 import { SignalTracker, getSignalAccounts, checkSignalNumber } from './signal-tracker.js';
-import { isValidMonitorToken, normalizeConsentedNumber } from './security.js';
+import { isValidMonitorToken, normalizeConsentedNumber, resolveSessionDuration } from './security.js';
 import { createContactRepository, type TrackedContact } from './infra/contact-repository.js';
 import { AdminSessions, clearedSessionCookie, sessionCookie, verifyPassword } from './auth.js';
+import { ActivityHistoryRecorder, createActivityHistoryStore, historySubjectKey, type HistorySubject } from './infra/activity-history.js';
 
 process.umask(0o077);
 
@@ -129,6 +130,38 @@ interface TrackerEntry {
 const trackers: Map<string, TrackerEntry> = new Map(); // JID/Number -> Tracker entry
 const pendingContacts = new Set<string>();
 const repository = await createContactRepository();
+const historyStore = await createActivityHistoryStore();
+const activityRecorders = new Map<string, ActivityHistoryRecorder>();
+
+app.get('/api/history/export', async (request, response) => {
+    try {
+        if (!(await sessions.valid(request.headers.cookie))) { response.status(401).end(); return; }
+        const key = request.query.subjectKey;
+        const subject = typeof key === 'string' ? (await historyStore.subjects()).find(item => item.key === key) : undefined;
+        if (!subject) { response.status(404).end(); return; }
+        const cell = (value: unknown) => {
+            let text = String(value ?? '');
+            if (/^[=+\-@]/.test(text)) text = `'${text}`;
+            return `"${text.replace(/"/g, '""')}"`;
+        };
+        response.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        response.setHeader('Content-Disposition', 'attachment; filename="activity-history.csv"');
+        response.setHeader('Cache-Control', 'no-store');
+        response.write('\ufeff');
+        response.write('nome,plataforma,numero,inicio,fim,duracao_segundos,rtt_medio_ms,origem,motivo_fim\n');
+        let offset = 0;
+        while (true) {
+            const rows = await historyStore.periods(subject.key, offset, 200);
+            for (const period of rows) {
+                const duration = period.endedAt === null ? '' : Math.max(0, Math.round((period.endedAt - period.startedAt) / 1000));
+                response.write([subject.label, subject.platform, subject.number, new Date(period.startedAt).toISOString(), period.endedAt === null ? '' : new Date(period.endedAt).toISOString(), duration, period.meanRttMs, period.source, period.endReason].map(cell).join(',') + '\n');
+            }
+            if (rows.length < 200) break;
+            offset += rows.length;
+        }
+        response.end();
+    } catch { if (!response.headersSent) response.status(500).end(); else response.end(); }
+});
 const expiryTimers = new Map<string, NodeJS.Timeout>();
 let reconnectTimer: NodeJS.Timeout | null = null;
 let reconnectDelay = 2000;
@@ -142,8 +175,25 @@ async function removeTrackedContact(id: string) {
         entry.tracker.stopTracking();
         trackers.delete(id);
     }
+    const recorder = activityRecorders.get(id);
+    if (recorder) { await recorder.stop(); activityRecorders.delete(id); }
     await repository.remove(id);
     io.emit('contact-removed', id);
+}
+
+async function prepareActivityRecorder(contact: TrackedContact): Promise<void> {
+    const key = historySubjectKey(contact.platform, contact.consentedNumber);
+    const subject: HistorySubject = { key, platform: contact.platform, number: contact.consentedNumber, label: contact.label, createdAt: Date.now() };
+    await historyStore.register(subject);
+    const recorder = new ActivityHistoryRecorder(historyStore, key);
+    await recorder.initialize();
+    activityRecorders.set(contact.id, recorder);
+}
+
+function publishTrackerUpdate(contact: TrackedContact, data: any): void {
+    io.emit('tracker-update', { jid: contact.id, platform: contact.platform, ...data });
+    const recorder = activityRecorders.get(contact.id);
+    if (recorder) void recorder.observe(data).catch(error => console.error('Could not record activity estimate', error));
 }
 
 function scheduleExpiry(contact: TrackedContact) {
@@ -175,11 +225,13 @@ function scheduleWhatsAppReconnect() {
     reconnectDelay = Math.min(reconnectDelay * 2, 30000);
 }
 
-function stopPlatform(platform: Platform) {
+async function stopPlatform(platform: Platform) {
     for (const [id, entry] of trackers) {
         if (entry.platform === platform) {
             entry.tracker.stopTracking();
             trackers.delete(id);
+            const recorder = activityRecorders.get(id);
+            if (recorder) { await recorder.stop(); activityRecorders.delete(id); }
         }
     }
 }
@@ -198,12 +250,14 @@ async function rehydratePlatform(platform: Platform) {
             if (platform === 'whatsapp' && isWhatsAppConnected) {
                 const tracker = new WhatsAppTracker(sock, contact.id);
                 tracker.setProbeMethod(contact.probeMethod || 'reaction');
-                tracker.onUpdate = data => io.emit('tracker-update', { jid: contact.id, platform, ...data });
+                await prepareActivityRecorder(contact);
+                tracker.onUpdate = data => publishTrackerUpdate(contact, data);
                 trackers.set(contact.id, { tracker, platform });
                 await tracker.startTracking();
             } else if (platform === 'signal' && isSignalConnected && signalAccountNumber) {
                 const tracker = new SignalTracker(SIGNAL_API_URL, signalAccountNumber, `+${number}`);
-                tracker.onUpdate = data => io.emit('tracker-update', { jid: contact.id, platform, ...data });
+                await prepareActivityRecorder(contact);
+                tracker.onUpdate = data => publishTrackerUpdate(contact, data);
                 trackers.set(contact.id, { tracker, platform });
                 await tracker.startTracking();
             }
@@ -214,6 +268,7 @@ async function rehydratePlatform(platform: Platform) {
         } catch (error) {
             trackers.get(contact.id)?.tracker.stopTracking();
             trackers.delete(contact.id);
+            activityRecorders.delete(contact.id);
             console.error(`Failed to restore ${platform} tracker`, error);
         }
     }
@@ -240,7 +295,7 @@ async function connectToWhatsApp() {
 
         if (connection === 'close') {
             isWhatsAppConnected = false;
-            stopPlatform('whatsapp');
+            await stopPlatform('whatsapp');
             io.emit('connection-closed');
             currentWhatsAppQr = null; // Clear QR on close
             const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
@@ -304,7 +359,7 @@ async function checkSignalConnection() {
         if (!available) {
             if (isSignalConnected) {
                 isSignalConnected = false;
-                stopPlatform('signal');
+                await stopPlatform('signal');
                 signalAccountNumber = null;
                 io.emit('signal-disconnected');
             }
@@ -324,7 +379,7 @@ async function checkSignalConnection() {
         } else {
             if (isSignalConnected) {
                 isSignalConnected = false;
-                stopPlatform('signal');
+                await stopPlatform('signal');
                 signalAccountNumber = null;
                 console.log('[SIGNAL] Disconnected');
                 io.emit('signal-disconnected');
@@ -338,7 +393,7 @@ async function checkSignalConnection() {
         console.log('[SIGNAL] Error checking connection:', err);
         if (isSignalConnected) {
             isSignalConnected = false;
-            stopPlatform('signal');
+            await stopPlatform('signal');
             signalAccountNumber = null;
             io.emit('signal-disconnected');
         }
@@ -438,8 +493,40 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('get-history-subjects', async () => {
+        try { socket.emit('history-subjects', await historyStore.subjects()); }
+        catch { socket.emit('error', { message: 'Could not load activity history.' }); }
+    });
+
+    socket.on('get-activity-history', async (request: { subjectKey?: unknown; offset?: unknown } | null) => {
+        const subjectKey = request?.subjectKey;
+        const offset = request?.offset;
+        if (typeof subjectKey !== 'string' || typeof offset !== 'number' || !Number.isInteger(offset) || offset < 0 || offset > 100_000) return;
+        try {
+            if (!(await historyStore.subjects()).some(subject => subject.key === subjectKey)) return;
+            const periods = await historyStore.periods(subjectKey, offset, 101);
+            socket.emit('activity-history', { subjectKey, offset, periods: periods.slice(0, 100), hasMore: periods.length > 100 });
+        } catch { socket.emit('error', { message: 'Could not load activity periods.' }); }
+    });
+
+    socket.on('delete-activity-history', async (subjectKey: unknown) => {
+        if (typeof subjectKey !== 'string') return;
+        const subjects = await historyStore.subjects().catch(() => []);
+        const subject = subjects.find(item => item.key === subjectKey);
+        if (!subject) return;
+        const contacts = await repository.list().catch(() => []);
+        if (contacts.some(contact => historySubjectKey(contact.platform, contact.consentedNumber) === subjectKey && trackers.has(contact.id))) {
+            socket.emit('error', { message: 'End the active session before deleting its history.' });
+            return;
+        }
+        try {
+            await historyStore.delete(subjectKey);
+            io.emit('history-deleted', subjectKey);
+        } catch { socket.emit('error', { message: 'Could not delete activity history.' }); }
+    });
+
     // Add contact - supports both WhatsApp and Signal
-    socket.on('add-contact', async (data: { number?: unknown; platform?: unknown; label?: unknown; consent?: unknown; notificationsAcknowledged?: unknown; durationMinutes?: unknown } | null) => {
+    socket.on('add-contact', async (data: { number?: unknown; platform?: unknown; label?: unknown; consent?: unknown; notificationsAcknowledged?: unknown; indefiniteConsentAcknowledged?: unknown; durationMinutes?: unknown } | null) => {
         const cleanNumber = normalizeConsentedNumber(data?.number);
         const label = normalizeLabel(data?.label);
         const platform = data?.platform;
@@ -455,13 +542,12 @@ io.on('connection', (socket) => {
             socket.emit('error', { message: 'Confirm that probes can trigger notifications before tracking.' });
             return;
         }
-        const durationMinutes = data.durationMinutes;
-        if (durationMinutes !== undefined &&
-            (typeof durationMinutes !== 'number' || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 60)) {
-            socket.emit('error', { message: 'Session duration must be 1 to 60 minutes.' });
+        const duration = resolveSessionDuration(data?.durationMinutes, data?.indefiniteConsentAcknowledged);
+        if (!duration.valid) {
+            socket.emit('error', { message: duration.message });
             return;
         }
-        const expiresAt = durationMinutes === undefined ? undefined : Date.now() + durationMinutes * 60_000;
+        const expiresAt = duration.expiresAt;
         const contactId = platform === 'signal' ? `signal:${cleanNumber}` : `${cleanNumber}@s.whatsapp.net`;
         if (pendingContacts.has(contactId) || trackers.has(contactId)) {
             socket.emit('error', { message: 'This contact is already being added or tracked.' });
@@ -505,19 +591,13 @@ io.on('connection', (socket) => {
 
                     console.log('[SIGNAL] Target registered; starting tracking');
                     const tracker = new SignalTracker(SIGNAL_API_URL, signalAccountNumber, targetNumber);
+                    const contact: TrackedContact = { id: signalId, platform: 'signal', consentedNumber: cleanNumber, label: label || undefined, notificationsAcknowledged: true, indefiniteConsentAcknowledged: duration.indefinite ? true : undefined, expiresAt };
+                    await prepareActivityRecorder(contact);
 
                     trackers.set(signalId, { tracker, platform: 'signal' });
-
-                    tracker.onUpdate = (updateData) => {
-                        io.emit('tracker-update', {
-                            jid: signalId,
-                            platform: 'signal',
-                            ...updateData
-                        });
-                    };
+                    tracker.onUpdate = updateData => publishTrackerUpdate(contact, updateData);
 
                     await tracker.startTracking();
-                    const contact: TrackedContact = { id: signalId, platform: 'signal', consentedNumber: cleanNumber, label: label || undefined, notificationsAcknowledged: true, expiresAt };
                     await repository.save(contact);
                     scheduleExpiry(contact);
 
@@ -533,6 +613,8 @@ io.on('connection', (socket) => {
                 } catch (err) {
                     trackers.get(signalId)?.tracker.stopTracking();
                     trackers.delete(signalId);
+                    await activityRecorders.get(signalId)?.stop();
+                    activityRecorders.delete(signalId);
                     console.error(err);
                     socket.emit('error', { message: 'Failed to start Signal tracking' });
                 }
@@ -558,27 +640,22 @@ io.on('connection', (socket) => {
                     if (result?.exists) {
                         const tracker = new WhatsAppTracker(sock, result.jid);
                         tracker.setProbeMethod(globalProbeMethod);
-                        trackers.set(result.jid, { tracker, platform: 'whatsapp' });
-                        startedJid = result.jid;
-
-                        tracker.onUpdate = (updateData) => {
-                            io.emit('tracker-update', {
-                                jid: result.jid,
-                                platform: 'whatsapp',
-                                ...updateData
-                            });
-                        };
-
-                        await tracker.startTracking();
                         const contact: TrackedContact = {
                             id: result.jid,
                             platform: 'whatsapp',
                             consentedNumber: cleanNumber,
                             label: label || undefined,
                             notificationsAcknowledged: true,
+                            indefiniteConsentAcknowledged: duration.indefinite ? true : undefined,
                             expiresAt,
                             probeMethod: globalProbeMethod
                         };
+                        await prepareActivityRecorder(contact);
+                        trackers.set(result.jid, { tracker, platform: 'whatsapp' });
+                        startedJid = result.jid;
+                        tracker.onUpdate = updateData => publishTrackerUpdate(contact, updateData);
+
+                        await tracker.startTracking();
                         await repository.save(contact);
                         scheduleExpiry(contact);
 
@@ -611,6 +688,8 @@ io.on('connection', (socket) => {
                     if (startedJid) {
                         trackers.get(startedJid)?.tracker.stopTracking();
                         trackers.delete(startedJid);
+                        await activityRecorders.get(startedJid)?.stop();
+                        activityRecorders.delete(startedJid);
                     }
                     console.error(err);
                     socket.emit('error', { jid: targetJid, message: 'Verification failed' });
@@ -641,6 +720,7 @@ io.on('connection', (socket) => {
             const contact = (await repository.list()).find(item => item.id === data.jid);
             if (!contact) throw new Error('Contact unavailable');
             await repository.save({ ...contact, label: label || undefined });
+            await historyStore.register({ key: historySubjectKey(contact.platform, contact.consentedNumber), platform: contact.platform, number: contact.consentedNumber, label: label || undefined, createdAt: Date.now() });
             io.emit('contact-label', { jid: data.jid, label: label || undefined });
         } catch { socket.emit('error', { message: 'Could not save contact name.' }); }
     });
@@ -654,8 +734,8 @@ io.on('connection', (socket) => {
 
         try {
             const contacts = await repository.list();
-            if (contacts.some(contact => contact.expiresAt && trackers.has(contact.id))) {
-                socket.emit('error', { message: 'Probe method is locked during a timed session.' });
+            if (contacts.some(contact => trackers.has(contact.id))) {
+                socket.emit('error', { message: 'Probe method is locked during an active session.' });
                 return;
             }
             await Promise.all(contacts.filter(contact => contact.platform === 'whatsapp' && trackers.has(contact.id))

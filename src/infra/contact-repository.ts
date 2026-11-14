@@ -9,6 +9,7 @@ export interface TrackedContact {
     consentedNumber: string;
     label?: string;
     notificationsAcknowledged: true;
+    indefiniteConsentAcknowledged?: true;
     expiresAt?: number;
     probeMethod?: 'delete' | 'reaction';
 }
@@ -19,6 +20,7 @@ function isAcknowledgedContact(item: any): item is TrackedContact {
         typeof item.consentedNumber === 'string' && /^\d{8,15}$/.test(item.consentedNumber) &&
         (item.label === undefined || (typeof item.label === 'string' && item.label.length <= 60)) &&
         item.notificationsAcknowledged === true &&
+        (item.expiresAt !== undefined || item.indefiniteConsentAcknowledged === true) &&
         (item.expiresAt === undefined || (Number.isFinite(item.expiresAt) && item.expiresAt > 0)) &&
         (item.probeMethod === undefined || item.probeMethod === 'delete' || item.probeMethod === 'reaction');
 }
@@ -110,8 +112,8 @@ export class RedisContactRepository implements ContactRepository {
         });
     }
 
-    async save({ id, platform, consentedNumber, label, notificationsAcknowledged, expiresAt, probeMethod }: TrackedContact): Promise<void> {
-        await this.redis.hset('tracker:contacts', id, JSON.stringify({ platform, consentedNumber, label, notificationsAcknowledged, expiresAt, probeMethod }));
+    async save({ id, platform, consentedNumber, label, notificationsAcknowledged, indefiniteConsentAcknowledged, expiresAt, probeMethod }: TrackedContact): Promise<void> {
+        await this.redis.hset('tracker:contacts', id, JSON.stringify({ platform, consentedNumber, label, notificationsAcknowledged, indefiniteConsentAcknowledged, expiresAt, probeMethod }));
     }
 
     async remove(id: string): Promise<void> {

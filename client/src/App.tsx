@@ -1,6 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { Activity, ArrowRight, LockKeyhole, LogOut, Radio, ShieldCheck } from 'lucide-react';
-import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
 import { useConnectionState } from './hooks/useConnectionState';
 import { SocketProvider, useSocket } from './providers/SocketProvider';
@@ -10,7 +9,6 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 function ConnectedApp({ username, onSignOut }: { username: string; onSignOut: () => void }) {
     const { authError } = useSocket();
     const { isConnected, connectionState } = useConnectionState();
-    const isAnyPlatformReady = connectionState.whatsapp || connectionState.signal;
 
     return (
         <div className="app-shell">
@@ -27,10 +25,10 @@ function ConnectedApp({ username, onSignOut }: { username: string; onSignOut: ()
             <main className="container-wide app-main">
                 <div className="page-heading">
                     <div><p className="eyebrow"><Radio size={14} /> PAINEL DE MONITORAMENTO</p><h1>Visão geral<span className="accent-dot">.</span></h1><p className="muted">Sinais em tempo real dos dispositivos autorizados.</p></div>
-                    <div className="heading-security"><ShieldCheck size={18} /><span>Ambiente de pesquisa<br /><strong>acesso restrito</strong></span></div>
+                    <div className="heading-visual"><div className="holo-radar" aria-hidden="true"><span className="radar-ring ring-one" /><span className="radar-ring ring-two" /><span className="radar-core"><Activity size={24} /></span><span className="radar-sweep" /></div><div className="heading-security"><ShieldCheck size={18} /><span>SIGNAL FEED<br /><strong>LIVE / SECURE</strong></span></div></div>
                 </div>
                 {authError && <p role="alert" className="alert-error">Falha na conexão: {authError}</p>}
-                {isAnyPlatformReady ? <Dashboard connectionState={connectionState} /> : <Login connectionState={connectionState} />}
+                <Dashboard connectionState={connectionState} />
             </main>
         </div>
     );
@@ -84,6 +82,7 @@ function App() {
         <main className="auth-screen">
             <div className="ambient-grid" aria-hidden="true" />
             <section className="auth-story">
+                <div className="auth-orbit" aria-hidden="true"><span /><span /><span /></div>
                 <div className="brand-row"><div className="brand-mark"><Activity size={24} /></div><strong>PHANTOM<span>•</span>RTT</strong></div>
                 <p className="eyebrow"><i className="pulse-dot" /> INTELIGÊNCIA DE SINAIS</p>
                 <h1>Observe o sinal.<br /><em>Entenda o padrão.</em></h1>

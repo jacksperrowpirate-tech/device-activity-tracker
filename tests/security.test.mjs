@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isValidMonitorToken, normalizeConsentedNumber } from '../dist/security.js';
+import { isValidMonitorToken, normalizeConsentedNumber, resolveSessionDuration } from '../dist/security.js';
 import { AdminSessions, hashPassword, verifyPassword, sessionCookie } from '../dist/auth.js';
 
 test('internal monitor token requires an exact match', () => {
@@ -41,4 +41,12 @@ test('consented numbers are normalized and invalid input is rejected', () => {
     assert.equal(normalizeConsentedNumber('123'), null);
     assert.equal(normalizeConsentedNumber('49170abc123'), null);
     assert.equal(normalizeConsentedNumber({ number: '491701234567' }), null);
+});
+
+test('unlimited tracking requires explicit authorization and timed sessions expire', () => {
+    assert.deepEqual(resolveSessionDuration(null, true, 1000), { valid: true, expiresAt: undefined, indefinite: true });
+    assert.equal(resolveSessionDuration(null, false).valid, false);
+    assert.equal(resolveSessionDuration(undefined, true).valid, false);
+    assert.deepEqual(resolveSessionDuration(15, false, 1000), { valid: true, expiresAt: 901000, indefinite: false });
+    assert.equal(resolveSessionDuration(61, false).valid, false);
 });

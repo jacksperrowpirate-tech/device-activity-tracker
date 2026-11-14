@@ -35,6 +35,21 @@ test('requires consent and notification acknowledgement before requesting a time
     expect(addButton).toBeEnabled();
     fireEvent.click(addButton);
     expect(mockSocket.emit).toHaveBeenCalledWith('add-contact', {
-        number: '491701234567', label: 'Pessoa A', platform: 'whatsapp', consent: true, notificationsAcknowledged: true, durationMinutes: 60
+        number: '491701234567', label: 'Pessoa A', platform: 'whatsapp', consent: true, notificationsAcknowledged: true, durationMinutes: 60, indefiniteConsentAcknowledged: undefined
     });
+});
+
+test('requires separate acknowledgement for a session without a time limit', () => {
+    render(<Dashboard connectionState={connectionState} />);
+    fireEvent.change(screen.getByPlaceholderText(/ex.: \+55/i), { target: { value: '491701234567' } });
+    fireEvent.change(screen.getByRole('combobox', { name: /duração/i }), { target: { value: 'unlimited' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: /autorizou explicitamente/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: /sondas podem gerar notificações/i }));
+    const addButton = screen.getByRole('button', { name: /adicionar contato/i });
+    expect(addButton).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /monitoramento sem prazo/i }));
+    fireEvent.click(addButton);
+    expect(mockSocket.emit).toHaveBeenCalledWith('add-contact', expect.objectContaining({
+        durationMinutes: null, indefiniteConsentAcknowledged: true
+    }));
 });
