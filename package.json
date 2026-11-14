@@ -27,29 +27,29 @@
   "homepage": "https://github.com/gommzystudio/device-activity-tracker#readme",
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test tests/*.test.mjs",
     "start": "npx tsx src/index.ts",
-    "start:server": "npm run start:signal-api && npx tsx src/server.ts",
+    "start:server": "tsx src/main.ts",
     "start:signal-api": "npx tsx src/scripts/init-signal.ts",
     "start:client": "cd client && npm start",
     "dev": "npm run start:server",
     "postinstall": "cd client && npm install"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "@whiskeysockets/baileys": "7.0.0-rc14",
     "cors": "^2.8.5",
     "express": "^5.0.1",
-    "pdf-parse": "^1.1.1",
+    "ioredis": "^5.3.2",
     "pino": "^10.1.0",
     "qrcode-terminal": "^0.12.0",
     "socket.io": "^4.8.1",
-    "ws": "^8.18.3"
+    "ws": "8.23.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/qrcode-terminal": "^0.12.2",
     "@types/ws": "^8.18.1",
-    "tailwindcss": "^3.4.18",
     "tsx": "^4.21.0",
     "typescript": "^5.7.2"
   },

@@ -105,6 +105,25 @@ export class WhatsAppTracker {
     private lastPresence: string | null = null;
     private probeMethod: ProbeMethod = 'delete'; // Default to delete method
     public onUpdate?: (data: any) => void;
+    private readonly onMessageUpdate = (updates: any[]) => {
+        for (const update of updates) {
+            if (update.key.remoteJid && this.trackedJids.has(update.key.remoteJid) && update.key.fromMe) {
+                this.analyzeUpdate(update);
+            }
+        }
+    };
+    private readonly onRawReceipt = (node: any) => this.handleRawReceipt(node);
+    private readonly onPresenceUpdate = (update: any) => {
+        if (!update.presences) return;
+        const targetNumber = this.targetJid.split('@')[0].split(':')[0];
+        for (const [jid, presenceData] of Object.entries(update.presences) as [string, any][]) {
+            const number = jid.split('@')[0].split(':')[0];
+            if (number !== targetNumber || !presenceData?.lastKnownPresence) continue;
+            this.trackedJids.add(jid);
+            this.lastPresence = presenceData.lastKnownPresence;
+            break;
+        }
+    };
 
     constructor(sock: WASocket, targetJid: string, debugMode: boolean = false) {
         this.sock = sock;
@@ -133,38 +152,13 @@ export class WhatsAppTracker {
         trackerLogger.info(`Probe method: ${this.probeMethod === 'delete' ? 'Silent Delete (covert)' : 'Reaction'}\n`);
 
         // Listen for message updates (receipts)
-        this.sock.ev.on('messages.update', (updates) => {
-            for (const update of updates) {
-                // Check if update is from any of the tracked JIDs (multi-device support)
-                if (update.key.remoteJid && this.trackedJids.has(update.key.remoteJid) && update.key.fromMe) {
-                    this.analyzeUpdate(update);
-                }
-            }
-        });
+        this.sock.ev.on('messages.update', this.onMessageUpdate);
 
         // Listen for raw receipts to catch 'inactive' type which are ignored by Baileys
-        this.sock.ws.on('CB:receipt', (node: any) => {
-            this.handleRawReceipt(node);
-        });
+        this.sock.ws.on('CB:receipt', this.onRawReceipt);
 
         // Listen for presence updates
-        this.sock.ev.on('presence.update', (update) => {
-            trackerLogger.debug('[PRESENCE] Raw update received:', JSON.stringify(update, null, 2));
-
-            if (update.presences) {
-                for (const [jid, presenceData] of Object.entries(update.presences)) {
-                    if (presenceData && presenceData.lastKnownPresence) {
-                        // Track multi-device JIDs (including LID)
-                        this.trackedJids.add(jid);
-                        trackerLogger.debug(`[MULTI-DEVICE] Added JID to tracking: ${jid}`);
-
-                        this.lastPresence = presenceData.lastKnownPresence;
-                        trackerLogger.debug(`[PRESENCE] Stored presence from ${jid}: ${this.lastPresence}`);
-                        break;
-                    }
-                }
-            }
-        });
+        this.sock.ev.on('presence.update', this.onPresenceUpdate);
 
         // Subscribe to presence updates
         try {
@@ -608,6 +602,9 @@ export class WhatsAppTracker {
      */
     public stopTracking() {
         this.isTracking = false;
+        this.sock.ev.off('messages.update', this.onMessageUpdate);
+        this.sock.ev.off('presence.update', this.onPresenceUpdate);
+        this.sock.ws.off('CB:receipt', this.onRawReceipt);
 
         // Clear all pending timeouts
         for (const timeoutId of this.probeTimeouts.values()) {

@@ -3,25 +3,23 @@ FROM node:20-alpine AS build
 
 WORKDIR /app
 
-# Install git and build dependencies
-RUN apk add --no-cache git python3 make g++
-
 # Copy package files
 COPY package*.json ./
 
 # Install dependencies
-RUN npm install
+RUN npm ci
 
 # Copy source code and config
 COPY public ./public
 COPY src ./src
+COPY index.html vite.config.ts ./
 COPY tsconfig.json ./
 COPY tailwind.config.js ./
 COPY postcss.config.js ./
 
 # Build argument for API URL
-ARG REACT_APP_API_URL=http://localhost:3001
-ENV REACT_APP_API_URL=${REACT_APP_API_URL}
+ARG VITE_API_URL=http://localhost:3001
+ENV VITE_API_URL=${VITE_API_URL}
 
 # Build the app
 RUN npm run build

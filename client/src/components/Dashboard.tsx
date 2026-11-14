@@ -1,8 +1,11 @@
-import React, { useEffect, useState } from 'react';
-import {Eye, EyeOff, Plus, Trash2, Zap, MessageCircle, Settings} from 'lucide-react';
-import { socket, Platform, ConnectionState } from '../App';
-import { ContactCard } from './ContactCard';
+import React, { Suspense, useEffect, useState } from 'react';
+import { Eye, EyeOff, Plus, Trash2, Zap, MessageCircle, Settings } from 'lucide-react';
+import { Platform, ConnectionState, ContactInfo } from '../types/connections';
 import { Login } from './Login';
+import { useSocket } from '../providers/SocketProvider';
+import { useTrackerEvents } from '../hooks/useTrackerEvents';
+
+const ContactCard = React.lazy(() => import('./ContactCard').then(module => ({ default: module.ContactCard })));
 
 type ProbeMethod = 'delete' | 'reaction';
 
@@ -10,35 +13,8 @@ interface DashboardProps {
     connectionState: ConnectionState;
 }
 
-interface TrackerData {
-    rtt: number;
-    avg: number;
-    median: number;
-    threshold: number;
-    state: string;
-    timestamp: number;
-}
-
-interface DeviceInfo {
-    jid: string;
-    state: string;
-    rtt: number;
-    avg: number;
-}
-
-interface ContactInfo {
-    jid: string;
-    displayNumber: string;
-    contactName: string;
-    data: TrackerData[];
-    devices: DeviceInfo[];
-    deviceCount: number;
-    presence: string | null;
-    profilePic: string | null;
-    platform: Platform;
-}
-
 export function Dashboard({ connectionState }: DashboardProps) {
+    const { socket } = useSocket();
     const [inputNumber, setInputNumber] = useState('');
     const [selectedPlatform, setSelectedPlatform] = useState<Platform>(
         connectionState.whatsapp ? 'whatsapp' : 'signal'
@@ -48,50 +24,16 @@ export function Dashboard({ connectionState }: DashboardProps) {
     const [privacyMode, setPrivacyMode] = useState(false);
     const [probeMethod, setProbeMethod] = useState<ProbeMethod>('delete');
     const [showConnections, setShowConnections] = useState(false);
+    const [consentConfirmed, setConsentConfirmed] = useState(false);
+
+    useTrackerEvents(socket, setContacts);
 
     useEffect(() => {
-        function onTrackerUpdate(update: any) {
-            const { jid, ...data } = update;
-            if (!jid) return;
+        if (selectedPlatform === 'whatsapp' && !connectionState.whatsapp && connectionState.signal) setSelectedPlatform('signal');
+        if (selectedPlatform === 'signal' && !connectionState.signal && connectionState.whatsapp) setSelectedPlatform('whatsapp');
+    }, [connectionState.whatsapp, connectionState.signal, selectedPlatform]);
 
-            setContacts(prev => {
-                const next = new Map(prev);
-                const contact = next.get(jid);
-
-                if (contact) {
-                    // Update existing contact
-                    const updatedContact = { ...contact };
-
-                    if (data.presence !== undefined) {
-                        updatedContact.presence = data.presence;
-                    }
-                    if (data.deviceCount !== undefined) {
-                        updatedContact.deviceCount = data.deviceCount;
-                    }
-                    if (data.devices !== undefined) {
-                        updatedContact.devices = data.devices;
-                    }
-
-                    // Add to chart data
-                    if (data.median !== undefined && data.devices && data.devices.length > 0) {
-                        const newDataPoint: TrackerData = {
-                            rtt: data.devices[0].rtt,
-                            avg: data.devices[0].avg,
-                            median: data.median,
-                            threshold: data.threshold,
-                            state: data.devices.find((d: DeviceInfo) => d.state.includes('Online'))?.state || data.devices[0].state,
-                            timestamp: Date.now(),
-                        };
-                        updatedContact.data = [...updatedContact.data, newDataPoint];
-                    }
-
-                    next.set(jid, updatedContact);
-                }
-
-                return next;
-            });
-        }
-
+    useEffect(() => {
         function onProfilePic(data: { jid: string, url: string | null }) {
             setContacts(prev => {
                 const next = new Map(prev);
@@ -131,6 +73,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
                 return next;
             });
             setInputNumber('');
+            setConsentConfirmed(false);
         }
 
         function onContactRemoved(jid: string) {
@@ -152,9 +95,11 @@ export function Dashboard({ connectionState }: DashboardProps) {
 
         function onTrackedContacts(contacts: { id: string, platform: Platform }[]) {
             setContacts(prev => {
-                const next = new Map(prev);
+                const next = new Map<string, ContactInfo>();
                 contacts.forEach(({ id, platform }) => {
-                    if (!next.has(id)) {
+                    if (prev.has(id)) {
+                        next.set(id, prev.get(id)!);
+                    } else {
                         // Extract display number from id
                         let displayNumber = id;
                         if (platform === 'signal') {
@@ -180,7 +125,6 @@ export function Dashboard({ connectionState }: DashboardProps) {
             });
         }
 
-        socket.on('tracker-update', onTrackerUpdate);
         socket.on('profile-pic', onProfilePic);
         socket.on('contact-name', onContactName);
         socket.on('contact-added', onContactAdded);
@@ -189,11 +133,9 @@ export function Dashboard({ connectionState }: DashboardProps) {
         socket.on('probe-method', onProbeMethod);
         socket.on('tracked-contacts', onTrackedContacts);
 
-        // Request tracked contacts after listeners are set up
         socket.emit('get-tracked-contacts');
 
         return () => {
-            socket.off('tracker-update', onTrackerUpdate);
             socket.off('profile-pic', onProfilePic);
             socket.off('contact-name', onContactName);
             socket.off('contact-added', onContactAdded);
@@ -202,18 +144,20 @@ export function Dashboard({ connectionState }: DashboardProps) {
             socket.off('probe-method', onProbeMethod);
             socket.off('tracked-contacts', onTrackedContacts);
         };
-    }, []);
+    }, [socket]);
 
     const handleAdd = () => {
-        if (!inputNumber) return;
-        socket.emit('add-contact', { number: inputNumber, platform: selectedPlatform });
+        if (!socket.connected || !inputNumber || !consentConfirmed) return;
+        socket.emit('add-contact', { number: inputNumber, platform: selectedPlatform, consent: true });
     };
 
     const handleRemove = (jid: string) => {
+        if (!socket) return;
         socket.emit('remove-contact', jid);
     };
 
     const handleProbeMethodChange = (method: ProbeMethod) => {
+        if (!socket) return;
         socket.emit('set-probe-method', method);
     };
 
@@ -336,11 +280,16 @@ export function Dashboard({ connectionState }: DashboardProps) {
                     />
                     <button
                         onClick={handleAdd}
+                        disabled={!consentConfirmed || !inputNumber.trim() || !socket.connected}
                         className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium transition-colors"
                     >
                         <Plus size={20} /> Add Contact
                     </button>
                 </div>
+                <label className="flex items-center gap-2 mt-3 text-sm text-gray-700">
+                    <input type="checkbox" checked={consentConfirmed} onChange={event => setConsentConfirmed(event.target.checked)} />
+                    I confirm this person explicitly consented to this research session.
+                </label>
                 {error && <p className="mt-2 text-red-500 text-sm">{error}</p>}
             </div>
 
@@ -356,23 +305,25 @@ export function Dashboard({ connectionState }: DashboardProps) {
                     <p className="text-gray-400 text-sm mt-2">Add a contact above to start tracking</p>
                 </div>
             ) : (
-                <div className="space-y-6">
-                    {Array.from(contacts.values()).map(contact => (
-                        <ContactCard
-                            key={contact.jid}
-                            jid={contact.jid}
-                            displayNumber={contact.contactName}
-                            data={contact.data}
-                            devices={contact.devices}
-                            deviceCount={contact.deviceCount}
-                            presence={contact.presence}
-                            profilePic={contact.profilePic}
-                            onRemove={() => handleRemove(contact.jid)}
-                            privacyMode={privacyMode}
-                            platform={contact.platform}
-                        />
-                    ))}
-                </div>
+                <Suspense fallback={<p>Loading contact details...</p>}>
+                    <div className="space-y-6">
+                        {Array.from(contacts.values()).map(contact => (
+                            <ContactCard
+                                key={contact.jid}
+                                jid={contact.jid}
+                                displayNumber={contact.contactName}
+                                data={contact.data}
+                                devices={contact.devices}
+                                deviceCount={contact.deviceCount}
+                                presence={contact.presence}
+                                profilePic={contact.profilePic}
+                                onRemove={() => handleRemove(contact.jid)}
+                                privacyMode={privacyMode}
+                                platform={contact.platform}
+                            />
+                        ))}
+                    </div>
+                </Suspense>
             )}
         </div>
     );

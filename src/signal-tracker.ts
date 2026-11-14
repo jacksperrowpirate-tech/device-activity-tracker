@@ -241,38 +241,35 @@ export class SignalTracker {
      * This ensures only ONE probe is in flight at a time (serialization)
      */
     private async sendSerializedProbe(): Promise<void> {
-        return new Promise<void>(async (resolve) => {
-            // Store resolve function so receipt handler can signal completion
+        this.pendingProbeStartTime = Date.now();
+        const sent = await this.sendProbe();
+        if (!sent) {
+            this.pendingProbeStartTime = null;
+            return;
+        }
+
+        await new Promise<void>(resolve => {
+            // A receipt may arrive while the HTTP send is still completing.
+            if (this.pendingProbeStartTime === null) return resolve();
             this.probeResolve = resolve;
-
-            // Record probe start time
-            this.pendingProbeStartTime = Date.now();
-
-            // Send the probe
-            await this.sendProbe();
-
-            // Set timeout - if no receipt within 15s, mark offline and continue
             this.pendingProbeTimeout = setTimeout(() => {
                 if (this.pendingProbeStartTime !== null) {
                     const elapsed = Date.now() - this.pendingProbeStartTime;
-                    logger.debug(`Probe timeout after ${elapsed}ms`);
-                    this.markDeviceOffline(this.targetNumber, elapsed);
+                    this.markDeviceUnknown(this.targetNumber, elapsed);
                     this.pendingProbeStartTime = null;
-                    this.pendingProbeTimeout = null;
-                    if (this.probeResolve) {
-                        this.probeResolve();
-                        this.probeResolve = null;
-                    }
                 }
+                this.pendingProbeTimeout = null;
+                this.probeResolve = null;
+                resolve();
             }, 15000);
         });
     }
 
-    private async sendProbe() {
+    private async sendProbe(): Promise<boolean> {
         if (this.probeMethod === 'reaction') {
-            await this.sendReactionProbe();
+            return this.sendReactionProbe();
         } else {
-            await this.sendMessageProbe();
+            return this.sendMessageProbe();
         }
     }
 
@@ -280,7 +277,7 @@ export class SignalTracker {
      * Send a reaction probe - sends a reaction to trigger delivery receipt
      * Uses serialized approach: correlation is by order, not timestamp
      */
-    private async sendReactionProbe() {
+    private async sendReactionProbe(): Promise<boolean> {
         const timestamp = Date.now();
         const reactions = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
         const randomReaction = reactions[Math.floor(Math.random() * reactions.length)];
@@ -289,6 +286,7 @@ export class SignalTracker {
             const response = await fetch(`${this.apiUrl}/v1/reactions/${encodeURIComponent(this.senderNumber)}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                signal: AbortSignal.timeout(10000),
                 body: JSON.stringify({
                     reaction: randomReaction,
                     recipient: this.targetNumber,
@@ -299,12 +297,15 @@ export class SignalTracker {
 
             if (response.ok || response.status === 204) {
                 logger.debug(`Reaction probe sent: ${randomReaction}`);
+                return true;
             } else {
                 const errorText = await response.text();
                 logger.debug(`Failed to send reaction probe: ${response.status} - ${errorText}`);
+                return false;
             }
         } catch (err) {
             logger.debug('Error sending reaction probe:', err);
+            return false;
         }
     }
 
@@ -312,11 +313,12 @@ export class SignalTracker {
      * Send a message probe - sends an invisible/minimal message
      * Uses serialized approach: correlation is by order, not timestamp
      */
-    private async sendMessageProbe() {
+    private async sendMessageProbe(): Promise<boolean> {
         try {
             const response = await fetch(`${this.apiUrl}/v2/send`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
+                signal: AbortSignal.timeout(10000),
                 body: JSON.stringify({
                     number: this.senderNumber,
                     recipients: [this.targetNumber],
@@ -326,32 +328,35 @@ export class SignalTracker {
 
             if (response.ok) {
                 logger.debug('Message probe sent');
+                return true;
             } else {
                 const errorText = await response.text();
                 logger.debug(`Failed to send message probe: ${response.status} - ${errorText}`);
+                return false;
             }
         } catch (err) {
             logger.debug('Error sending message probe:', err);
+            return false;
         }
     }
 
-    private markDeviceOffline(identifier: string, timeout: number) {
+    private markDeviceUnknown(identifier: string, timeout: number) {
         if (!this.deviceMetrics.has(identifier)) {
             this.deviceMetrics.set(identifier, {
                 rttHistory: [],
                 recentRtts: [],
-                state: 'OFFLINE',
+                state: 'No receipt',
                 lastRtt: timeout,
                 lastUpdate: Date.now()
             });
         } else {
             const metrics = this.deviceMetrics.get(identifier)!;
-            metrics.state = 'OFFLINE';
+            metrics.state = 'No receipt';
             metrics.lastRtt = timeout;
             metrics.lastUpdate = Date.now();
         }
 
-        logger.info(`Device ${identifier} marked as OFFLINE (no receipt after ${timeout}ms)`);
+        logger.info(`No receipt from ${identifier} after ${timeout}ms`);
         this.sendUpdate();
     }
 
@@ -397,7 +402,7 @@ export class SignalTracker {
         const metrics = this.deviceMetrics.get(identifier);
         if (!metrics) return;
 
-        if (metrics.state === 'OFFLINE') {
+        if (metrics.state === 'No receipt') {
             if (metrics.lastRtt <= 5000 && metrics.recentRtts.length > 0) {
                 logger.debug(`Device ${identifier} came back online (RTT: ${metrics.lastRtt}ms)`);
             } else {
@@ -499,7 +504,7 @@ export class SignalTracker {
  */
 export async function getSignalAccounts(apiUrl: string): Promise<string[]> {
     try {
-        const response = await fetch(`${apiUrl}/v1/accounts`);
+        const response = await fetch(`${apiUrl}/v1/accounts`, { signal: AbortSignal.timeout(5000) });
         if (response.ok) {
             const data = await response.json();
             return data.map((acc: any) => acc.number || acc);

@@ -5,19 +5,31 @@ services:
       dockerfile: Dockerfile
       args:
         - PORT=${BACKEND_PORT:-3001}
-    extra_hosts:
-      - "localhost:host-gateway"
     ports:
       - "${BACKEND_PORT:-3001}:${BACKEND_PORT:-3001}"
     environment:
       - PORT=${BACKEND_PORT:-3001}
-      - SIGNAL_API_URL=${SIGNAL_API_URL:-http://localhost:8080}
+      - SIGNAL_API_URL=http://signal-api:8080
+      - ADMIN_TOKEN=${ADMIN_TOKEN:?Set ADMIN_TOKEN in .env}
+      - CONSENTED_NUMBERS=${CONSENTED_NUMBERS:-}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-http://localhost:3000}
+      - CONTACT_STORE=${CONTACT_STORE:-redis}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_URL=${REDIS_URL:-}
+      - REDIS_USERNAME=${REDIS_USERNAME:-}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - NODE_ENV=${NODE_ENV:-production}
     volumes:
       # Persist WhatsApp auth state
-      - baileys_auth:/app/baileys_auth_info
+      - baileys_auth:/app/auth_info_baileys
+      - contact_data:/app/data
     networks:
       - app-network
+      - service-network
+    depends_on:
+      - redis
+      - signal-api
     restart: unless-stopped
 
   client:
@@ -26,7 +38,7 @@ services:
       dockerfile: Dockerfile
       args:
         - PORT=${CLIENT_PORT:-3000}
-        - REACT_APP_API_URL=${BACKEND_URL:-http://localhost:3001}
+        - VITE_API_URL=${BACKEND_URL:-http://localhost:3001}
     ports:
       - "${CLIENT_PORT:-3000}:${CLIENT_PORT:-3000}"
     environment:
@@ -39,18 +51,35 @@ services:
 
   signal-api:
     image: bbernhard/signal-cli-rest-api
-    ports:
-      - "8080:8080"
     environment:
       - MODE=json-rpc
+    volumes:
+      - signal_data:/home/.local/share/signal-cli
     restart: unless-stopped
     networks:
-      - app-network
+      - service-network
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - service-network
+    restart: unless-stopped
 
 volumes:
   baileys_auth:
     driver: local
+  redis_data:
+    driver: local
+  signal_data:
+    driver: local
+  contact_data:
+    driver: local
 
 networks:
   app-network:
+    driver: bridge
+  service-network:
     driver: bridge

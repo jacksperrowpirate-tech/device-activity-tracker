@@ -111,6 +111,8 @@ export function ContactCard({
 
                         <h4 className="text-xl font-bold text-gray-900 mb-1">{blurredNumber}</h4>
 
+                        <p className="text-xs text-gray-500 mb-2">RTT estimate; network delays can affect this status.</p>
+
                         <div className="flex items-center gap-2 mb-4">
                             <span className={clsx(
                                 "px-3 py-1 rounded-full text-sm font-medium",

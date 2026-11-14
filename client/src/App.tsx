@@ -1,144 +1,55 @@
-import React, { useEffect, useState } from 'react';
-import { io, Socket } from 'socket.io-client';
+import React, { FormEvent, useState } from 'react';
 import { Login } from './components/Login';
 import { Dashboard } from './components/Dashboard';
+import { useConnectionState } from './hooks/useConnectionState';
+import { SocketProvider, useSocket } from './providers/SocketProvider';
 
-// Create socket with autoConnect disabled so we can add listeners before connecting
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
-export const socket: Socket = io(API_URL, { autoConnect: false });
-
-export type Platform = 'whatsapp' | 'signal';
-
-export interface ConnectionState {
-    whatsapp: boolean;
-    signal: boolean;
-    signalNumber: string | null;
-    signalApiAvailable: boolean;
-    signalQrImage: string | null;
-    whatsappQr: string | null;
-}
-
-function App() {
-    const [isConnected, setIsConnected] = useState(socket.connected);
-    const [connectionState, setConnectionState] = useState<ConnectionState>({
-        whatsapp: false,
-        signal: false,
-        signalNumber: null,
-        signalApiAvailable: false,
-        signalQrImage: null,
-        whatsappQr: null
-    });
-
+function ConnectedApp({ onSignOut }: { onSignOut: () => void }) {
+    const { authError } = useSocket();
+    const { isConnected, connectionState } = useConnectionState();
     const isAnyPlatformReady = connectionState.whatsapp || connectionState.signal;
 
-    useEffect(() => {
-        function onConnect() {
-            setIsConnected(true);
-        }
-
-        function onDisconnect() {
-            setIsConnected(false);
-            setConnectionState({
-                whatsapp: false,
-                signal: false,
-                signalNumber: null,
-                signalApiAvailable: false,
-                signalQrImage: null,
-                whatsappQr: null
-            });
-        }
-
-        function onWhatsAppConnectionOpen() {
-            setConnectionState(prev => ({ ...prev, whatsapp: true, whatsappQr: null }));
-        }
-
-        function onWhatsAppQr(qr: string) {
-            console.log('[WHATSAPP] Received QR code');
-            setConnectionState(prev => ({ ...prev, whatsappQr: qr }));
-        }
-
-        function onSignalConnectionOpen(data: { number: string }) {
-            setConnectionState(prev => ({
-                ...prev,
-                signal: true,
-                signalNumber: data.number
-            }));
-        }
-
-        function onSignalDisconnected() {
-            setConnectionState(prev => ({
-                ...prev,
-                signal: false,
-                signalNumber: null
-            }));
-        }
-
-        function onSignalApiStatus(data: { available: boolean }) {
-            setConnectionState(prev => ({ ...prev, signalApiAvailable: data.available }));
-        }
-
-        function onSignalQrImage(url: string) {
-            console.log('[SIGNAL] Received QR image URL:', url);
-            setConnectionState(prev => ({ ...prev, signalQrImage: url }));
-        }
-
-        socket.on('connect', onConnect);
-        socket.on('disconnect', onDisconnect);
-        socket.on('qr', onWhatsAppQr);
-        socket.on('connection-open', onWhatsAppConnectionOpen);
-        socket.on('signal-connection-open', onSignalConnectionOpen);
-        socket.on('signal-disconnected', onSignalDisconnected);
-        socket.on('signal-api-status', onSignalApiStatus);
-        socket.on('signal-qr-image', onSignalQrImage);
-
-        // Now connect after listeners are set up
-        if (!socket.connected) {
-            socket.connect();
-        }
-
-        return () => {
-            socket.off('connect', onConnect);
-            socket.off('disconnect', onDisconnect);
-            socket.off('qr', onWhatsAppQr);
-            socket.off('connection-open', onWhatsAppConnectionOpen);
-            socket.off('signal-connection-open', onSignalConnectionOpen);
-            socket.off('signal-disconnected', onSignalDisconnected);
-            socket.off('signal-api-status', onSignalApiStatus);
-            socket.off('signal-qr-image', onSignalQrImage);
-        };
-    }, []);
-
     return (
-        <div className="min-h-screen bg-gray-100 p-8">
+        <div className="min-h-screen bg-gray-100 p-4 md:p-8">
             <div className="max-w-6xl mx-auto">
-                <header className="mb-8 flex justify-between items-center">
+                <header className="mb-8 flex flex-wrap justify-between items-center gap-4">
                     <h1 className="text-3xl font-bold text-gray-900">Activity Tracker</h1>
-                    <div className="flex items-center gap-2">
-                        <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-                        <span className="text-sm text-gray-600">{isConnected ? 'Server Connected' : 'Disconnected'}</span>
-                        {isConnected && (
-                            <>
-                                <div className="w-px h-4 bg-gray-300 mx-2" />
-                                <div className={`w-3 h-3 rounded-full ${connectionState.whatsapp ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                                <span className="text-sm text-gray-600">WhatsApp</span>
-                                <div className="w-px h-4 bg-gray-300 mx-2" />
-                                <div className={`w-3 h-3 rounded-full ${connectionState.signal ? 'bg-green-500' : 'bg-yellow-500'}`} />
-                                <span className="text-sm text-gray-600">Signal</span>
-                            </>
-                        )}
+                    <div className="flex items-center gap-3 text-sm text-gray-600">
+                        <span>{isConnected ? 'Server Connected' : 'Disconnected'}</span>
+                        {isConnected && <span>WhatsApp: {connectionState.whatsapp ? 'Connected' : 'Waiting'} · Signal: {connectionState.signal ? 'Connected' : 'Waiting'}</span>}
+                        <button type="button" onClick={onSignOut} className="underline">Sign out</button>
                     </div>
                 </header>
-
-                <main>
-                    {!isAnyPlatformReady ? (
-                        <Login connectionState={connectionState} />
-                    ) : (
-                        <Dashboard connectionState={connectionState} />
-                    )}
-                </main>
+                {authError && <p role="alert" className="mb-4 text-red-700">Connection failed: {authError}</p>}
+                <main>{isAnyPlatformReady ? <Dashboard connectionState={connectionState} /> : <Login connectionState={connectionState} />}</main>
             </div>
         </div>
     );
+}
+
+function App() {
+    const [token, setToken] = useState('');
+    const [tokenInput, setTokenInput] = useState('');
+    const signIn = (event: FormEvent) => {
+        event.preventDefault();
+        if (tokenInput.trim()) setToken(tokenInput.trim());
+    };
+
+    if (!token) {
+        return (
+            <main className="min-h-screen flex items-center justify-center bg-gray-100 p-4">
+                <form onSubmit={signIn} className="w-full max-w-sm bg-white rounded-xl border p-6 space-y-4">
+                    <h1 className="text-2xl font-semibold">Activity Tracker</h1>
+                    <p className="text-sm text-gray-600">Enter the administrator token configured on the server.</p>
+                    <label htmlFor="admin-token" className="block text-sm font-medium">Administrator token</label>
+                    <input id="admin-token" type="password" autoComplete="current-password" value={tokenInput} onChange={event => setTokenInput(event.target.value)} className="w-full border rounded-lg px-3 py-2" required />
+                    <button type="submit" className="w-full rounded-lg bg-blue-600 text-white px-4 py-2">Connect</button>
+                </form>
+            </main>
+        );
+    }
+
+    return <SocketProvider token={token}><ConnectedApp onSignOut={() => { setToken(''); setTokenInput(''); }} /></SocketProvider>;
 }
 
 export default App;

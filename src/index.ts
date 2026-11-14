@@ -8,6 +8,7 @@
  */
 
 const debugMode = process.argv.includes('--debug') || process.argv.includes('-d');
+process.umask(0o077);
 const originalConsoleLog = console.log;
 const originalStdoutWrite = process.stdout.write.bind(process.stdout);
 
@@ -63,7 +64,14 @@ import { pino } from 'pino';
 import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import { WhatsAppTracker } from './tracker.js';
+import { normalizeConsentedNumber } from './security.js';
 import * as readline from 'readline';
+
+const consentedNumbers = new Set((process.env.CONSENTED_NUMBERS || '')
+    .split(',').map(normalizeConsentedNumber).filter((number): number is string => number !== null));
+if (consentedNumbers.size === 0) {
+    throw new Error('Set CONSENTED_NUMBERS before starting the CLI');
+}
 
 if (debugMode) {
     originalConsoleLog('🔍 Debug mode enabled\n');
@@ -140,10 +148,16 @@ async function connectToWhatsApp() {
 
         rl.question('Enter target phone number (with country code, e.g., 491701234567): ', async (number) => {
             // Basic cleanup
-            const cleanNumber = number.replace(/\D/g, '');
+            const cleanNumber = normalizeConsentedNumber(number);
 
-            if (cleanNumber.length < 10) {
+            if (!cleanNumber) {
                 originalConsoleLog('Invalid number format. Please try again.');
+                rl.close();
+                askForTarget();
+                return;
+            }
+            if (!consentedNumbers.has(cleanNumber)) {
+                originalConsoleLog('This number is not in CONSENTED_NUMBERS.');
                 rl.close();
                 askForTarget();
                 return;

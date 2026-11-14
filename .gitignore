@@ -11,6 +11,7 @@ client/build/
 auth_info_baileys/
 auth_info_multi/
 .wwebjs_auth/
+data/
 
 # Environment variables
 .env
@@ -78,4 +79,3 @@ jspm_packages/
 # Misc
 .cache
 .parcel-cache
-package-lock.json
