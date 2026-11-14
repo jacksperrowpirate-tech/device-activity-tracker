@@ -36,4 +36,5 @@ export interface ContactInfo {
     presence: string | null;
     profilePic: string | null;
     platform: Platform;
+    expiresAt?: number;
 }

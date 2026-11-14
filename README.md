@@ -143,7 +143,7 @@ Follow prompts to authenticate and enter a consenting target number. The flag co
 
 - **🟢 Online**: Device is actively being used (RTT below threshold)
 - **🟡 Standby**: Device is idle/locked (RTT above threshold)
-- **🔴 Offline**: Device is offline or unreachable (no CLIENT ACK received)
+- **⚪ No ACK**: No delivery confirmation arrived within 10 seconds; this does not prove that the device is offline.
 
 ## How It Works
 
@@ -153,8 +153,8 @@ The tracker sends probe messages and measures the Round-Trip Time (RTT) to detec
 
 | Method | Description                                                                                                     |
 |--------|-----------------------------------------------------------------------------------------------------------------|
-| **Delete** (Default) | Sends a "delete" request for a non-existent message ID; can trigger notifications. |
-| **Reaction** | Sends a reaction emoji referencing a non-existent message from the linked account; may trigger notifications. |
+| **Delete** | Sends a "delete" request for a non-existent message ID; triggered a notification in our WhatsApp test. |
+| **Reaction** (Default) | Sends a reaction emoji referencing a non-existent message from the linked account; may trigger notifications. |
 
 ### Detection Logic
 
@@ -162,7 +162,7 @@ The time between sending the probe message and receiving the CLIENT ACK (Status 
 
 ### Switching Probe Methods
 
-In the web interface, you can switch between probe methods using the dropdown in the control panel. In CLI mode, the delete method is used by default.
+In the web interface, you can switch between probe methods using the control panel. The CLI also defaults to reactions. For a time-limited Socket.IO session, include `durationMinutes` (1–60) in the `add-contact` payload; the backend stops and removes the contact at expiry, including after a reconnect.
 
 ## Common Issues
 

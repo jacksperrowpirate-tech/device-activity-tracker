@@ -4,6 +4,8 @@ import { ContactInfo, DeviceInfo, TrackerData } from '../types/connections';
 
 interface TrackerUpdate {
     jid?: string;
+    eventKind?: 'measurement' | 'no-ack';
+    measuredJid?: string;
     presence?: string | null;
     deviceCount?: number;
     devices?: DeviceInfo[];
@@ -27,14 +29,15 @@ export function useTrackerEvents(
                 if (data.presence !== undefined) updated.presence = data.presence;
                 if (data.deviceCount !== undefined) updated.deviceCount = data.deviceCount;
                 if (data.devices !== undefined) updated.devices = data.devices;
-                const device = data.devices?.[0];
-                if (device && data.median !== undefined) {
+                const device = data.devices?.find(item => item.jid === data.measuredJid && item.rtt > 0)
+                    ?? data.devices?.find(item => item.rtt > 0);
+                if (device && data.eventKind !== 'no-ack' && data.median !== undefined) {
                     const point: TrackerData = {
                         rtt: device.rtt,
                         avg: device.avg,
                         median: data.median,
                         threshold: data.threshold ?? 0,
-                        state: data.devices?.find(item => item.state.includes('Online'))?.state ?? device.state,
+                        state: device.state,
                         timestamp: Date.now()
                     };
                     updated.data = [...updated.data.slice(-119), point];

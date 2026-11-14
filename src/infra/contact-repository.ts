@@ -3,12 +3,20 @@ import path from 'node:path';
 import { Redis } from 'ioredis';
 
 export type Platform = 'whatsapp' | 'signal';
-export interface TrackedContact { id: string; platform: Platform; notificationsAcknowledged: true }
+export interface TrackedContact {
+    id: string;
+    platform: Platform;
+    notificationsAcknowledged: true;
+    expiresAt?: number;
+    probeMethod?: 'delete' | 'reaction';
+}
 
 function isAcknowledgedContact(item: any): item is TrackedContact {
     return typeof item?.id === 'string' &&
         (item.platform === 'whatsapp' || item.platform === 'signal') &&
-        item.notificationsAcknowledged === true;
+        item.notificationsAcknowledged === true &&
+        (item.expiresAt === undefined || (Number.isFinite(item.expiresAt) && item.expiresAt > 0)) &&
+        (item.probeMethod === undefined || item.probeMethod === 'delete' || item.probeMethod === 'reaction');
 }
 
 export interface ContactRepository {
@@ -98,8 +106,8 @@ export class RedisContactRepository implements ContactRepository {
         });
     }
 
-    async save({ id, platform, notificationsAcknowledged }: TrackedContact): Promise<void> {
-        await this.redis.hset('tracker:contacts', id, JSON.stringify({ platform, notificationsAcknowledged }));
+    async save({ id, platform, notificationsAcknowledged, expiresAt, probeMethod }: TrackedContact): Promise<void> {
+        await this.redis.hset('tracker:contacts', id, JSON.stringify({ platform, notificationsAcknowledged, expiresAt, probeMethod }));
     }
 
     async remove(id: string): Promise<void> {

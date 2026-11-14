@@ -17,7 +17,7 @@ import { Boom } from '@hapi/boom';
 import { WhatsAppTracker, ProbeMethod } from './tracker.js';
 import { SignalTracker, getSignalAccounts, checkSignalNumber } from './signal-tracker.js';
 import { isValidAdminToken, normalizeConsentedNumber } from './security.js';
-import { createContactRepository } from './infra/contact-repository.js';
+import { createContactRepository, type TrackedContact } from './infra/contact-repository.js';
 
 process.umask(0o077);
 
@@ -56,7 +56,7 @@ let sock: any;
 let isWhatsAppConnected = false;
 let isSignalConnected = false;
 let signalAccountNumber: string | null = null;
-let globalProbeMethod: ProbeMethod = 'delete'; // Default to delete method
+let globalProbeMethod: ProbeMethod = 'reaction';
 let currentWhatsAppQr: string | null = null; // Store current QR code for new clients
 
 // Platform type for contacts
@@ -70,8 +70,32 @@ interface TrackerEntry {
 const trackers: Map<string, TrackerEntry> = new Map(); // JID/Number -> Tracker entry
 const pendingContacts = new Set<string>();
 const repository = await createContactRepository();
+const expiryTimers = new Map<string, NodeJS.Timeout>();
 let reconnectTimer: NodeJS.Timeout | null = null;
 let reconnectDelay = 2000;
+
+async function removeTrackedContact(id: string) {
+    const timer = expiryTimers.get(id);
+    if (timer) clearTimeout(timer);
+    expiryTimers.delete(id);
+    const entry = trackers.get(id);
+    if (entry) {
+        entry.tracker.stopTracking();
+        trackers.delete(id);
+    }
+    await repository.remove(id);
+    io.emit('contact-removed', id);
+}
+
+function scheduleExpiry(contact: TrackedContact) {
+    if (!contact.expiresAt) return;
+    const previous = expiryTimers.get(contact.id);
+    if (previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+        void removeTrackedContact(contact.id).catch(error => console.error('Could not expire tracked contact', error));
+    }, Math.max(0, contact.expiresAt - Date.now()));
+    expiryTimers.set(contact.id, timer);
+}
 
 function scheduleWhatsAppReconnect() {
     if (reconnectTimer) return;
@@ -98,6 +122,10 @@ async function rehydratePlatform(platform: Platform) {
     const contacts = await repository.list();
     for (const contact of contacts) {
         if (contact.platform !== platform || trackers.has(contact.id)) continue;
+        if (contact.expiresAt && contact.expiresAt <= Date.now()) {
+            await removeTrackedContact(contact.id);
+            continue;
+        }
         const number = contact.id.startsWith('signal:')
             ? contact.id.slice('signal:'.length)
             : contact.id.split('@')[0];
@@ -105,7 +133,7 @@ async function rehydratePlatform(platform: Platform) {
         try {
             if (platform === 'whatsapp' && isWhatsAppConnected) {
                 const tracker = new WhatsAppTracker(sock, contact.id);
-                tracker.setProbeMethod(globalProbeMethod);
+                tracker.setProbeMethod(contact.probeMethod || 'reaction');
                 tracker.onUpdate = data => io.emit('tracker-update', { jid: contact.id, platform, ...data });
                 trackers.set(contact.id, { tracker, platform });
                 await tracker.startTracking();
@@ -116,7 +144,8 @@ async function rehydratePlatform(platform: Platform) {
                 await tracker.startTracking();
             }
             if (trackers.has(contact.id)) {
-                io.emit('contact-added', { jid: contact.id, number, platform });
+                scheduleExpiry(contact);
+                io.emit('contact-added', { jid: contact.id, number, platform, expiresAt: contact.expiresAt });
             }
         } catch (error) {
             trackers.get(contact.id)?.tracker.stopTracking();
@@ -346,7 +375,7 @@ io.on('connection', (socket) => {
     });
 
     // Add contact - supports both WhatsApp and Signal
-    socket.on('add-contact', async (data: { number?: unknown; platform?: unknown; consent?: unknown; notificationsAcknowledged?: unknown } | null) => {
+    socket.on('add-contact', async (data: { number?: unknown; platform?: unknown; consent?: unknown; notificationsAcknowledged?: unknown; durationMinutes?: unknown } | null) => {
         const cleanNumber = normalizeConsentedNumber(data?.number);
         const platform = data?.platform;
         if (!cleanNumber || (platform !== 'signal' && platform !== 'whatsapp')) {
@@ -361,6 +390,13 @@ io.on('connection', (socket) => {
             socket.emit('error', { message: 'Confirm that probes can trigger notifications before tracking.' });
             return;
         }
+        const durationMinutes = data.durationMinutes;
+        if (durationMinutes !== undefined &&
+            (typeof durationMinutes !== 'number' || !Number.isInteger(durationMinutes) || durationMinutes < 1 || durationMinutes > 60)) {
+            socket.emit('error', { message: 'Session duration must be 1 to 60 minutes.' });
+            return;
+        }
+        const expiresAt = durationMinutes === undefined ? undefined : Date.now() + durationMinutes * 60_000;
         const contactId = platform === 'signal' ? `signal:${cleanNumber}` : `${cleanNumber}@s.whatsapp.net`;
         if (pendingContacts.has(contactId) || trackers.has(contactId)) {
             socket.emit('error', { message: 'This contact is already being added or tracked.' });
@@ -416,12 +452,15 @@ io.on('connection', (socket) => {
                     };
 
                     await tracker.startTracking();
-                    await repository.save({ id: signalId, platform: 'signal', notificationsAcknowledged: true });
+                    const contact: TrackedContact = { id: signalId, platform: 'signal', notificationsAcknowledged: true, expiresAt };
+                    await repository.save(contact);
+                    scheduleExpiry(contact);
 
                     io.emit('contact-added', {
                         jid: signalId,
                         number: cleanNumber,
-                        platform: 'signal'
+                        platform: 'signal',
+                        expiresAt
                     });
 
                     io.emit('contact-name', { jid: signalId, name: cleanNumber });
@@ -465,7 +504,15 @@ io.on('connection', (socket) => {
                         };
 
                         await tracker.startTracking();
-                        await repository.save({ id: result.jid, platform: 'whatsapp', notificationsAcknowledged: true });
+                        const contact: TrackedContact = {
+                            id: result.jid,
+                            platform: 'whatsapp',
+                            notificationsAcknowledged: true,
+                            expiresAt,
+                            probeMethod: globalProbeMethod
+                        };
+                        await repository.save(contact);
+                        scheduleExpiry(contact);
 
                         const ppUrl = await tracker.getProfilePicture();
 
@@ -482,7 +529,8 @@ io.on('connection', (socket) => {
                         io.emit('contact-added', {
                             jid: result.jid,
                             number: cleanNumber,
-                            platform: 'whatsapp'
+                            platform: 'whatsapp',
+                            expiresAt
                         });
 
                         io.emit('profile-pic', { jid: result.jid, url: ppUrl });
@@ -507,26 +555,33 @@ io.on('connection', (socket) => {
     socket.on('remove-contact', async (jid: string) => {
         if (typeof jid !== 'string') return;
         try {
-            await repository.remove(jid);
-            const entry = trackers.get(jid);
-            if (entry) {
-                entry.tracker.stopTracking();
-                trackers.delete(jid);
-            }
-            io.emit('contact-removed', jid);
+            await removeTrackedContact(jid);
         } catch (error) {
             console.error('Failed to remove saved contact', error);
             socket.emit('error', { message: 'Could not remove saved contact.' });
         }
     });
 
-    socket.on('set-probe-method', (method: ProbeMethod) => {
+    socket.on('set-probe-method', async (method: ProbeMethod) => {
         console.log(`Request to change probe method to: ${method}`);
         if (method !== 'delete' && method !== 'reaction') {
             socket.emit('error', { message: 'Invalid probe method' });
             return;
         }
 
+        try {
+            const contacts = await repository.list();
+            if (contacts.some(contact => contact.expiresAt && trackers.has(contact.id))) {
+                socket.emit('error', { message: 'Probe method is locked during a timed session.' });
+                return;
+            }
+            await Promise.all(contacts.filter(contact => contact.platform === 'whatsapp' && trackers.has(contact.id))
+                .map(contact => repository.save({ ...contact, probeMethod: method })));
+        } catch (error) {
+            console.error('Failed to save probe method', error);
+            socket.emit('error', { message: 'Could not change probe method.' });
+            return;
+        }
         globalProbeMethod = method;
 
         for (const entry of trackers.values()) {

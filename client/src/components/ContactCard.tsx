@@ -32,6 +32,7 @@ interface ContactCardProps {
     onRemove: () => void;
     privacyMode?: boolean;
     platform?: Platform;
+    expiresAt?: number;
 }
 
 export function ContactCard({
@@ -44,12 +45,15 @@ export function ContactCard({
     profilePic,
     onRemove,
     privacyMode = false,
-    platform = 'whatsapp'
+    platform = 'whatsapp',
+    expiresAt
 }: ContactCardProps) {
     const lastData = data[data.length - 1];
     const currentStatus = devices.length > 0
-        ? (devices.find(d => d.state === 'OFFLINE')?.state ||
-            devices.find(d => d.state.includes('Online'))?.state ||
+        ? (devices.find(d => d.state.includes('Online'))?.state ||
+            devices.find(d => d.state === 'Standby')?.state ||
+            devices.find(d => d.state === 'Calibrating...')?.state ||
+            devices.find(d => d.state === 'Delayed ACK')?.state ||
             devices[0].state)
         : 'Unknown';
 
@@ -68,7 +72,10 @@ export function ContactCard({
                         <MessageCircle size={12} />
                         {platform === 'whatsapp' ? 'WhatsApp' : 'Signal'}
                     </span>
-                    <h3 className="text-lg font-semibold text-gray-900">{blurredNumber}</h3>
+                    <div>
+                        <h3 className="text-lg font-semibold text-gray-900">{blurredNumber}</h3>
+                        {expiresAt && <p className="text-xs text-gray-600">Stops automatically at {new Date(expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</p>}
+                    </div>
                 </div>
                 <button
                     onClick={onRemove}
@@ -104,7 +111,7 @@ export function ContactCard({
                             </div>
                             <div className={clsx(
                                 "absolute bottom-2 right-2 w-6 h-6 rounded-full border-2 border-white",
-                                currentStatus === 'OFFLINE' ? "bg-red-500" :
+                                currentStatus === 'No ACK' ? "bg-gray-400" :
                                     currentStatus.includes('Online') ? "bg-green-500" : "bg-gray-400"
                             )} />
                         </div>
@@ -116,7 +123,7 @@ export function ContactCard({
                         <div className="flex items-center gap-2 mb-4">
                             <span className={clsx(
                                 "px-3 py-1 rounded-full text-sm font-medium",
-                                currentStatus === 'OFFLINE' ? "bg-red-100 text-red-700" :
+                                currentStatus === 'No ACK' ? "bg-gray-100 text-gray-700" :
                                     currentStatus.includes('Online') ? "bg-green-100 text-green-700" :
                                         currentStatus === 'Standby' ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-700"
                             )}>
@@ -148,7 +155,7 @@ export function ContactCard({
                                             </div>
                                             <span className={clsx(
                                                 "px-2 py-0.5 rounded text-xs font-medium",
-                                                device.state === 'OFFLINE' ? "bg-red-100 text-red-700" :
+                                                device.state === 'No ACK' ? "bg-gray-100 text-gray-700" :
                                                     device.state.includes('Online') ? "bg-green-100 text-green-700" :
                                                         device.state === 'Standby' ? "bg-yellow-100 text-yellow-700" : "bg-gray-100 text-gray-700"
                                             )}>
@@ -166,7 +173,7 @@ export function ContactCard({
                         {/* Metrics Grid */}
                         <div className="grid grid-cols-3 gap-4">
                             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                                <div className="text-sm text-gray-500 mb-1 flex items-center gap-1"><Activity size={16} /> Current Avg RTT</div>
+                                <div className="text-sm text-gray-500 mb-1 flex items-center gap-1"><Activity size={16} /> Latest confirmed Avg RTT</div>
                                 <div className="text-2xl font-bold text-gray-900">{lastData?.avg.toFixed(0) || '-'} ms</div>
                             </div>
                             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">

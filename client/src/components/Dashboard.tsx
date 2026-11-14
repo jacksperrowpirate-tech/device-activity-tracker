@@ -22,10 +22,11 @@ export function Dashboard({ connectionState }: DashboardProps) {
     const [contacts, setContacts] = useState<Map<string, ContactInfo>>(new Map());
     const [error, setError] = useState<string | null>(null);
     const [privacyMode, setPrivacyMode] = useState(false);
-    const [probeMethod, setProbeMethod] = useState<ProbeMethod>('delete');
+    const [probeMethod, setProbeMethod] = useState<ProbeMethod>('reaction');
     const [showConnections, setShowConnections] = useState(false);
     const [consentConfirmed, setConsentConfirmed] = useState(false);
     const [notificationsAcknowledged, setNotificationsAcknowledged] = useState(false);
+    const hasTimedSession = Array.from(contacts.values()).some(contact => Boolean(contact.expiresAt));
 
     useTrackerEvents(socket, setContacts);
 
@@ -57,7 +58,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
             });
         }
 
-        function onContactAdded(data: { jid: string, number: string, platform?: Platform }) {
+        function onContactAdded(data: { jid: string, number: string, platform?: Platform, expiresAt?: number }) {
             setContacts(prev => {
                 const next = new Map(prev);
                 next.set(data.jid, {
@@ -69,7 +70,8 @@ export function Dashboard({ connectionState }: DashboardProps) {
                     deviceCount: 0,
                     presence: null,
                     profilePic: null,
-                    platform: data.platform || 'whatsapp'
+                    platform: data.platform || 'whatsapp',
+                    expiresAt: data.expiresAt
                 });
                 return next;
             });
@@ -95,12 +97,12 @@ export function Dashboard({ connectionState }: DashboardProps) {
             setProbeMethod(method);
         }
 
-        function onTrackedContacts(contacts: { id: string, platform: Platform }[]) {
+        function onTrackedContacts(contacts: { id: string, platform: Platform, expiresAt?: number }[]) {
             setContacts(prev => {
                 const next = new Map<string, ContactInfo>();
-                contacts.forEach(({ id, platform }) => {
+                contacts.forEach(({ id, platform, expiresAt }) => {
                     if (prev.has(id)) {
-                        next.set(id, prev.get(id)!);
+                        next.set(id, { ...prev.get(id)!, expiresAt });
                     } else {
                         // Extract display number from id
                         let displayNumber = id;
@@ -119,7 +121,8 @@ export function Dashboard({ connectionState }: DashboardProps) {
                             deviceCount: 0,
                             presence: null,
                             profilePic: null,
-                            platform
+                            platform,
+                            expiresAt
                         });
                     }
                 });
@@ -195,6 +198,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
                             <div className="flex rounded-lg overflow-hidden border border-gray-300">
                                 <button
                                     onClick={() => handleProbeMethodChange('delete')}
+                                    disabled={hasTimedSession}
                                     className={`px-3 py-1.5 text-sm font-medium transition-all duration-200 flex items-center gap-1 ${
                                         probeMethod === 'delete'
                                             ? 'bg-purple-600 text-white'
@@ -207,6 +211,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
                                 </button>
                                 <button
                                     onClick={() => handleProbeMethodChange('reaction')}
+                                    disabled={hasTimedSession}
                                     className={`px-3 py-1.5 text-sm font-medium transition-all duration-200 flex items-center gap-1 ${
                                         probeMethod === 'reaction'
                                             ? 'bg-yellow-500 text-white'
@@ -218,6 +223,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
                                     Reaction
                                 </button>
                             </div>
+                            {hasTimedSession && <span className="text-xs text-gray-500">Locked for timed test</span>}
                         </div>
                         {/* Privacy Mode Toggle */}
                         <button
@@ -331,6 +337,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
                                 onRemove={() => handleRemove(contact.jid)}
                                 privacyMode={privacyMode}
                                 platform={contact.platform}
+                                expiresAt={contact.expiresAt}
                             />
                         ))}
                     </div>

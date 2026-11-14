@@ -39,6 +39,34 @@ test('reaction probes refer to a message from the linked account', async () => {
     tracker.stopTracking();
 });
 
+test('an ACK arriving during sendMessage is measured and a timeout is not reported as offline', async () => {
+    const events = new EventEmitter();
+    const socket = {
+        ev: events,
+        ws: new EventEmitter(),
+        user: { id: '491700000000@s.whatsapp.net' },
+        presenceSubscribe: async () => undefined,
+        sendMessage: async (jid, _message, options) => {
+            events.emit('messages.update', [{
+                key: { id: options.messageId, remoteJid: 'device-identifier@lid', fromMe: true },
+                update: { status: 3 }
+            }]);
+            return { key: { id: options.messageId, remoteJid: jid } };
+        }
+    };
+    const tracker = new WhatsAppTracker(socket, '491701234567@s.whatsapp.net');
+    const updates = [];
+    tracker.onUpdate = update => updates.push(update);
+    await tracker.startTracking();
+    tracker.stopTracking();
+    assert.ok(updates.some(update => update.devices?.some(device => device.rtt > 0)));
+    assert.equal(tracker.probeTimeouts.size, 0);
+
+    tracker.markProbeUnconfirmed('491701234567@s.whatsapp.net', 10000);
+    const unconfirmed = updates.at(-1).devices.find(device => device.state === 'No ACK');
+    assert.equal(unconfirmed?.rtt, 0);
+});
+
 test('a failed Signal send does not classify the target as offline', async () => {
     const previousFetch = globalThis.fetch;
     globalThis.fetch = async () => new Response('failed', { status: 500 });
