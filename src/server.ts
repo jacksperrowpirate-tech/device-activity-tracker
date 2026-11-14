@@ -338,7 +338,7 @@ io.on('connection', (socket) => {
     // Handle request to get tracked contacts (for page refresh)
     socket.on('get-tracked-contacts', async () => {
         try {
-            socket.emit('tracked-contacts', await repository.list());
+            socket.emit('tracked-contacts', (await repository.list()).filter(contact => trackers.has(contact.id)));
         } catch (error) {
             console.error('Failed to list saved contacts', error);
             socket.emit('error', { message: 'Could not load saved contacts.' });
@@ -346,7 +346,7 @@ io.on('connection', (socket) => {
     });
 
     // Add contact - supports both WhatsApp and Signal
-    socket.on('add-contact', async (data: { number?: unknown; platform?: unknown; consent?: unknown } | null) => {
+    socket.on('add-contact', async (data: { number?: unknown; platform?: unknown; consent?: unknown; notificationsAcknowledged?: unknown } | null) => {
         const cleanNumber = normalizeConsentedNumber(data?.number);
         const platform = data?.platform;
         if (!cleanNumber || (platform !== 'signal' && platform !== 'whatsapp')) {
@@ -355,6 +355,10 @@ io.on('connection', (socket) => {
         }
         if (data?.consent !== true || !consentedNumbers.has(cleanNumber)) {
             socket.emit('error', { message: 'This number requires recorded consent and inclusion in CONSENTED_NUMBERS.' });
+            return;
+        }
+        if (data.notificationsAcknowledged !== true) {
+            socket.emit('error', { message: 'Confirm that probes can trigger notifications before tracking.' });
             return;
         }
         const contactId = platform === 'signal' ? `signal:${cleanNumber}` : `${cleanNumber}@s.whatsapp.net`;
@@ -412,7 +416,7 @@ io.on('connection', (socket) => {
                     };
 
                     await tracker.startTracking();
-                    await repository.save({ id: signalId, platform: 'signal' });
+                    await repository.save({ id: signalId, platform: 'signal', notificationsAcknowledged: true });
 
                     io.emit('contact-added', {
                         jid: signalId,
@@ -461,7 +465,7 @@ io.on('connection', (socket) => {
                         };
 
                         await tracker.startTracking();
-                        await repository.save({ id: result.jid, platform: 'whatsapp' });
+                        await repository.save({ id: result.jid, platform: 'whatsapp', notificationsAcknowledged: true });
 
                         const ppUrl = await tracker.getProfilePicture();
 

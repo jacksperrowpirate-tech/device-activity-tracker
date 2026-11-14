@@ -23,15 +23,17 @@ const connectionState = {
     whatsappQr: null
 };
 
-test('requires consent before requesting contact tracking', () => {
+test('requires consent and notification acknowledgement before requesting contact tracking', () => {
     render(<Dashboard connectionState={connectionState} />);
     const addButton = screen.getByRole('button', { name: /add contact/i });
     fireEvent.change(screen.getByPlaceholderText(/enter phone number/i), { target: { value: '491701234567' } });
     expect(addButton).toBeDisabled();
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /explicitly consented/i }));
+    expect(addButton).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: /probes can trigger phone notifications/i }));
     expect(addButton).toBeEnabled();
     fireEvent.click(addButton);
     expect(mockSocket.emit).toHaveBeenCalledWith('add-contact', {
-        number: '491701234567', platform: 'whatsapp', consent: true
+        number: '491701234567', platform: 'whatsapp', consent: true, notificationsAcknowledged: true
     });
 });

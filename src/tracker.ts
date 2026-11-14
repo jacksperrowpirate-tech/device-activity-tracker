@@ -9,7 +9,7 @@ const logger = pino({
 
 /**
  * Probe method types
- * - 'delete': Silent delete probe (sends delete request for non-existent message) - DEFAULT
+ * - 'delete': Delete probe (may trigger a notification) - DEFAULT
  * - 'reaction': Reaction probe (sends reaction to non-existent message)
  */
 export type ProbeMethod = 'delete' | 'reaction';
@@ -134,7 +134,7 @@ export class WhatsAppTracker {
 
     public setProbeMethod(method: ProbeMethod) {
         this.probeMethod = method;
-        trackerLogger.info(`\n🔄 Probe method changed to: ${method === 'delete' ? 'Silent Delete' : 'Reaction'}\n`);
+        trackerLogger.info(`\n🔄 Probe method changed to: ${method === 'delete' ? 'Delete' : 'Reaction'}\n`);
     }
 
     public getProbeMethod(): ProbeMethod {
@@ -149,7 +149,7 @@ export class WhatsAppTracker {
         if (this.isTracking) return;
         this.isTracking = true;
         trackerLogger.info(`\n✅ Tracking started for ${this.targetJid}`);
-        trackerLogger.info(`Probe method: ${this.probeMethod === 'delete' ? 'Silent Delete (covert)' : 'Reaction'}\n`);
+        trackerLogger.info(`Probe method: ${this.probeMethod === 'delete' ? 'Delete' : 'Reaction'} (may trigger notifications)\n`);
 
         // Listen for message updates (receipts)
         this.sock.ev.on('messages.update', this.onMessageUpdate);
@@ -205,7 +205,8 @@ export class WhatsAppTracker {
     }
 
     /**
-     * Send a delete probe - completely silent/covert method
+     * Send a delete probe. The recipient may receive a notification even when no
+     * message appears in the conversation.
      * Sends a "delete" command for a non-existent message
      */
     private async sendDeleteProbe() {
@@ -225,7 +226,7 @@ export class WhatsAppTracker {
             };
 
             trackerLogger.debug(
-                `[PROBE-DELETE] Sending silent delete probe for fake message ${randomMsgId}`
+                `[PROBE-DELETE] Sending delete probe for fake message ${randomMsgId}`
             );
             const startTime = Date.now();
             

@@ -3,7 +3,13 @@ import path from 'node:path';
 import { Redis } from 'ioredis';
 
 export type Platform = 'whatsapp' | 'signal';
-export interface TrackedContact { id: string; platform: Platform }
+export interface TrackedContact { id: string; platform: Platform; notificationsAcknowledged: true }
+
+function isAcknowledgedContact(item: any): item is TrackedContact {
+    return typeof item?.id === 'string' &&
+        (item.platform === 'whatsapp' || item.platform === 'signal') &&
+        item.notificationsAcknowledged === true;
+}
 
 export interface ContactRepository {
     list(): Promise<TrackedContact[]>;
@@ -21,8 +27,7 @@ export class FileContactRepository implements ContactRepository {
         try {
             const parsed: unknown = JSON.parse(await readFile(this.filename, 'utf8'));
             if (!Array.isArray(parsed)) return [];
-            return parsed.filter((item): item is TrackedContact =>
-                typeof item?.id === 'string' && (item.platform === 'whatsapp' || item.platform === 'signal'));
+            return parsed.filter(isAcknowledgedContact);
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
             throw error;
@@ -44,8 +49,7 @@ export class FileContactRepository implements ContactRepository {
     private async readWithoutPending(): Promise<TrackedContact[]> {
         try {
             const parsed: unknown = JSON.parse(await readFile(this.filename, 'utf8'));
-            return Array.isArray(parsed) ? parsed.filter((item): item is TrackedContact =>
-                typeof item?.id === 'string' && (item.platform === 'whatsapp' || item.platform === 'signal')) : [];
+            return Array.isArray(parsed) ? parsed.filter(isAcknowledgedContact) : [];
         } catch (error) {
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
             throw error;
@@ -82,12 +86,20 @@ export class RedisContactRepository implements ContactRepository {
 
     async list(): Promise<TrackedContact[]> {
         const stored = await this.redis.hgetall('tracker:contacts');
-        return Object.entries(stored).flatMap(([id, platform]) =>
-            platform === 'whatsapp' || platform === 'signal' ? [{ id, platform }] : []);
+        return Object.entries(stored).flatMap(([id, value]) => {
+            try {
+                const parsed: unknown = JSON.parse(value);
+                const contact = { ...(typeof parsed === 'object' && parsed !== null ? parsed : {}), id };
+                return isAcknowledgedContact(contact) ? [contact] : [];
+            } catch {
+                // Legacy values only stored the platform; their consent must be renewed.
+                return [];
+            }
+        });
     }
 
-    async save({ id, platform }: TrackedContact): Promise<void> {
-        await this.redis.hset('tracker:contacts', id, platform);
+    async save({ id, platform, notificationsAcknowledged }: TrackedContact): Promise<void> {
+        await this.redis.hset('tracker:contacts', id, JSON.stringify({ platform, notificationsAcknowledged }));
     }
 
     async remove(id: string): Promise<void> {

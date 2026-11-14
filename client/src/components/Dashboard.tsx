@@ -25,6 +25,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
     const [probeMethod, setProbeMethod] = useState<ProbeMethod>('delete');
     const [showConnections, setShowConnections] = useState(false);
     const [consentConfirmed, setConsentConfirmed] = useState(false);
+    const [notificationsAcknowledged, setNotificationsAcknowledged] = useState(false);
 
     useTrackerEvents(socket, setContacts);
 
@@ -74,6 +75,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
             });
             setInputNumber('');
             setConsentConfirmed(false);
+            setNotificationsAcknowledged(false);
         }
 
         function onContactRemoved(jid: string) {
@@ -147,8 +149,13 @@ export function Dashboard({ connectionState }: DashboardProps) {
     }, [socket]);
 
     const handleAdd = () => {
-        if (!socket.connected || !inputNumber || !consentConfirmed) return;
-        socket.emit('add-contact', { number: inputNumber, platform: selectedPlatform, consent: true });
+        if (!socket.connected || !inputNumber || !consentConfirmed || !notificationsAcknowledged) return;
+        socket.emit('add-contact', {
+            number: inputNumber,
+            platform: selectedPlatform,
+            consent: true,
+            notificationsAcknowledged: true
+        });
     };
 
     const handleRemove = (jid: string) => {
@@ -193,7 +200,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
                                             ? 'bg-purple-600 text-white'
                                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                     }`}
-                                    title="Silent Delete Probe - Completely covert, target sees nothing"
+                                    title="Delete probes can trigger notifications on the recipient's phone"
                                 >
                                     <Trash2 size={14} />
                                     Delete
@@ -205,7 +212,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
                                             ? 'bg-yellow-500 text-white'
                                             : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                                     }`}
-                                    title="Reaction Probe - Sends reactions to non-existent messages"
+                                    title="Reaction probes can trigger notifications on the recipient's phone"
                                 >
                                     <Zap size={14} />
                                     Reaction
@@ -280,7 +287,7 @@ export function Dashboard({ connectionState }: DashboardProps) {
                     />
                     <button
                         onClick={handleAdd}
-                        disabled={!consentConfirmed || !inputNumber.trim() || !socket.connected}
+                        disabled={!consentConfirmed || !notificationsAcknowledged || !inputNumber.trim() || !socket.connected}
                         className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 font-medium transition-colors"
                     >
                         <Plus size={20} /> Add Contact
@@ -289,6 +296,10 @@ export function Dashboard({ connectionState }: DashboardProps) {
                 <label className="flex items-center gap-2 mt-3 text-sm text-gray-700">
                     <input type="checkbox" checked={consentConfirmed} onChange={event => setConsentConfirmed(event.target.checked)} />
                     I confirm this person explicitly consented to this research session.
+                </label>
+                <label className="flex items-center gap-2 mt-2 text-sm text-red-700">
+                    <input type="checkbox" checked={notificationsAcknowledged} onChange={event => setNotificationsAcknowledged(event.target.checked)} />
+                    I understand probes can trigger phone notifications and may repeat as often as every 2 seconds, even if I close this page, until I remove this contact.
                 </label>
                 {error && <p className="mt-2 text-red-500 text-sm">{error}</p>}
             </div>

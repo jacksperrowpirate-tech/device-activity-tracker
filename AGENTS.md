@@ -29,4 +29,4 @@ Recent commits use short imperative subjects, sometimes prefixed with `fix:` or 
 
 ## Security & Configuration
 
-Never commit `.env`, authentication/session folders, or `data/` contents. Set `ADMIN_TOKEN` and list consenting targets in `CONSENTED_NUMBERS`; use `.env.example` only as a template. This is a research proof of concept; obtain explicit consent before tracking any account.
+Never commit `.env`, authentication/session folders, or `data/` contents. Set `ADMIN_TOKEN` and list consenting targets in `CONSENTED_NUMBERS`; use `.env.example` only as a template. Obtain explicit consent before tracking and tell recipients that probes can trigger phone notifications even when no message appears. Keep older contacts dormant until notification acknowledgement is recorded again.

@@ -72,6 +72,9 @@ const consentedNumbers = new Set((process.env.CONSENTED_NUMBERS || '')
 if (consentedNumbers.size === 0) {
     throw new Error('Set CONSENTED_NUMBERS before starting the CLI');
 }
+if (!process.argv.includes('--acknowledge-notifications')) {
+    throw new Error('Probes can trigger phone notifications. Pass --acknowledge-notifications after obtaining the recipient\'s consent.');
+}
 
 if (debugMode) {
     originalConsoleLog('🔍 Debug mode enabled\n');

@@ -310,7 +310,7 @@ export class SignalTracker {
     }
 
     /**
-     * Send a message probe - sends an invisible/minimal message
+     * Send a minimal message probe. It may still appear or trigger a notification.
      * Uses serialized approach: correlation is by order, not timestamp
      */
     private async sendMessageProbe(): Promise<boolean> {
@@ -322,7 +322,7 @@ export class SignalTracker {
                 body: JSON.stringify({
                     number: this.senderNumber,
                     recipients: [this.targetNumber],
-                    message: '\u200B' // Zero-width space (nearly invisible)
+                    message: '\u200B' // Zero-width space; not guaranteed to be invisible to recipients
                 })
             });
 

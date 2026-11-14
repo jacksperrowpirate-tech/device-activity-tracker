@@ -59,6 +59,7 @@ cp .env.example .env
 
 # Set ADMIN_TOKEN to a unique value (openssl rand -hex 32)
 # Set CONSENTED_NUMBERS to a comma-separated list of consenting targets
+# Tell each recipient that probes may generate phone notifications
 # Adjust ALLOWED_ORIGINS if the frontend is not at http://localhost:3000
 
 # Build and start containers
@@ -90,7 +91,9 @@ For Signal in a local setup, start its API separately with `npm run start:signal
 
 Open `http://localhost:3000`, scan the QR code with WhatsApp, then enter the phone number to track (e.g., `491701234567`).
 
-Tracked contacts are saved in Redis by default or in `data/contacts.json` with `CONTACT_STORE=file`. When a platform reconnects, the backend resumes saved contacts still listed in `CONSENTED_NUMBERS`. Signal account data lives in its own Docker volume; the current QR image is kept only in backend memory during linking.
+Tracked contacts are saved in Redis by default or in `data/contacts.json` with `CONTACT_STORE=file`. When a platform reconnects, the backend resumes saved contacts that recorded notification acknowledgement and remain listed in `CONSENTED_NUMBERS`. Older saved contacts are not resumed; add them again after obtaining informed consent. Signal account data lives in its own Docker volume; the current QR image is kept only in backend memory during linking.
+
+**Notifications:** A real WhatsApp test showed that delete probes can trigger phone notifications even when no message appears in the conversation. Reaction and Signal probes may also notify recipients. Both the recipient's consent and an explicit notification acknowledgement are required before starting tracking. Probes continue if the dashboard is closed and may resume after a backend restart; remove the contact to stop them.
 
 **Measurement limits:** Activity labels are estimates from RTT and can be affected by network latency, dropped receipts, or platform changes. Signal reactions return no probe identifier, so a delivery receipt from the same contact during an outstanding probe may be unrelated. Treat these measurements as exploratory data, not proof of a person's activity.
 
@@ -118,10 +121,10 @@ After `docker compose up --build`, use `docker compose ps` to check the four ser
 ### CLI Interface (only WhatsApp)
 
 ```bash
-CONSENTED_NUMBERS=491701234567 npm start
+CONSENTED_NUMBERS=491701234567 npm start -- --acknowledge-notifications
 ```
 
-Follow prompts to authenticate and enter target number.
+Follow prompts to authenticate and enter a consenting target number. The flag confirms that you have informed the recipient about possible notifications.
 
 **Example Output:**
 
@@ -150,8 +153,8 @@ The tracker sends probe messages and measures the Round-Trip Time (RTT) to detec
 
 | Method | Description                                                                                                     |
 |--------|-----------------------------------------------------------------------------------------------------------------|
-| **Delete** (Default) | Sends a "delete" request for a non-existent message ID.                                                         |
-| **Reaction** | Sends a reaction emoji to a non-existent message ID. |
+| **Delete** (Default) | Sends a "delete" request for a non-existent message ID; can trigger notifications. |
+| **Reaction** | Sends a reaction emoji to a non-existent message ID; may trigger notifications. |
 
 ### Detection Logic
 
